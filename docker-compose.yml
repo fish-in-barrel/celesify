@@ -1,0 +1,37 @@
+services:
+  preprocessing:
+    build:
+      context: ./services/preprocessing
+    image: cs610-stellar-preprocessing:latest
+    volumes:
+      - ./data:/workspace/data
+      - shared_outputs:/workspace/outputs
+    working_dir: /workspace
+    command: ["python", "/app/preprocess.py"]
+
+  training:
+    build:
+      context: ./services/training
+      args:
+        BASE_IMAGE: ${TRAINING_BASE_IMAGE:-nvidia/cuda:12.4.1-runtime-ubuntu22.04}
+    image: cs610-stellar-training:latest
+    volumes:
+      - shared_outputs:/workspace/outputs
+    working_dir: /workspace
+    command: ["python", "/app/train.py"]
+
+  streamlit:
+    build:
+      context: ./services/streamlit
+    image: cs610-stellar-streamlit:latest
+    volumes:
+      - shared_outputs:/workspace/outputs
+    working_dir: /workspace
+    ports:
+      - "8501:8501"
+    command: ["streamlit", "run", "/app/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    depends_on:
+      - training
+
+volumes:
+  shared_outputs:
