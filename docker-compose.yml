@@ -3,6 +3,9 @@ services:
     build:
       context: ./services/preprocessing
     image: cs610-stellar-preprocessing:latest
+    environment:
+      - KAGGLE_USERNAME
+      - KAGGLE_KEY
     volumes:
       - ./data:/workspace/data
       - shared_outputs:/workspace/outputs

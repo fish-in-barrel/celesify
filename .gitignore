@@ -16,6 +16,11 @@ venv/
 Thumbs.db
 .vscode/
 
+# Local environment secrets (direnv)
+.envrc
+**/.envrc
+!.envrc.template
+
 # Local dataset and generated artifacts
 data/
 outputs/
