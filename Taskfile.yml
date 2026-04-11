@@ -1,0 +1,40 @@
+version: "3"
+
+vars:
+  PYTHON_BIN: python3
+  VENV_DIR: venv
+  VENV_PIP: "{{.VENV_DIR}}/bin/pip"
+
+tasks:
+  default:
+    desc: Set up the local development environment.
+    deps:
+      - setup
+
+  venv:
+    desc: Create the local Python virtual environment if it does not exist.
+    status:
+      - test -x "{{.VENV_DIR}}/bin/python"
+    cmds:
+      - "{{.PYTHON_BIN}} -m venv {{.VENV_DIR}}"
+
+  install-requirements:
+    desc: Install the requirements for preprocessing, training, and Streamlit into the local venv.
+    deps:
+      - venv
+    cmds:
+      - "{{.VENV_PIP}} install --upgrade pip setuptools wheel"
+      - "{{.VENV_PIP}} install -r services/preprocessing/requirements.txt"
+      - "{{.VENV_PIP}} install -r services/training/requirements.txt"
+      - "{{.VENV_PIP}} install -r services/streamlit/requirements.txt"
+
+  docker-build:
+    desc: Build the Docker images defined in docker-compose.yml.
+    cmds:
+      - docker compose build
+
+  setup:
+    desc: Create the venv, install Python requirements, and build the Docker images.
+    deps:
+      - install-requirements
+      - docker-build
