@@ -5,7 +5,9 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+COPY pyproject.toml /app/pyproject.toml
+COPY CLAUDE.md /app/CLAUDE.md
+COPY celesify /app/celesify
+RUN pip install --no-cache-dir ".[preprocessing]"
 
-COPY preprocess.py /app/preprocess.py
+ENTRYPOINT ["python", "-m", "celesify.preprocessing.main"]

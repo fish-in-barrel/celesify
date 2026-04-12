@@ -1,5 +1,6 @@
 ARG BASE_IMAGE=nvidia/cuda:12.4.1-devel-ubuntu22.04
 FROM ${BASE_IMAGE}
+ARG INSTALL_GPU_DEPS=0
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -19,7 +20,10 @@ RUN set -eux; \
     fi; \
     rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+COPY pyproject.toml /app/pyproject.toml
+COPY CLAUDE.md /app/CLAUDE.md
+COPY celesify /app/celesify
+RUN pip install --no-cache-dir ".[training-core,training-onnx]" && \
+    if [ "$INSTALL_GPU_DEPS" = "1" ]; then pip install --no-cache-dir ".[training-gpu]"; fi
 
-COPY train.py /app/train.py
+ENTRYPOINT ["python", "-m", "celesify.training.main"]

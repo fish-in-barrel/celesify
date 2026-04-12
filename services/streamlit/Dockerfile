@@ -5,7 +5,9 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+COPY pyproject.toml /app/pyproject.toml
+COPY CLAUDE.md /app/CLAUDE.md
+COPY celesify /app/celesify
+RUN pip install --no-cache-dir ".[streamlit]"
 
-COPY app.py /app/app.py
+ENTRYPOINT ["python", "-m", "streamlit", "run", "/app/celesify/streamlit_app/main.py", "--server.address=0.0.0.0", "--server.port=8501"]

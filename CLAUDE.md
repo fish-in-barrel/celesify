@@ -1,4 +1,4 @@
-# CLAUDE.md — SDSS17 Stellar Classification
+# CLAUDE.md — celesify
 
 This file describes the project structure, implementation plan, and working conventions for
 this codebase. Read it before making changes.

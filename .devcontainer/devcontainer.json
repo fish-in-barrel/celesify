@@ -1,6 +1,7 @@
 {
-  "name": "CS610 Stellar Classification",
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "name": "celesify",
+  "image": "nvidia/cuda:12.4.1-devel-ubuntu22.04",
+  "runArgs": ["--gpus=all"],
   "features": {
     "ghcr.io/devcontainers/features/python:1": {
       "version": "3.11"
@@ -14,7 +15,7 @@
   "customizations": {
     "vscode": {
       "settings": {
-        "python.defaultInterpreterPath": "/usr/bin/python3",
+        "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
         "python.analysis.typeCheckingMode": "basic"
       },
       "extensions": [
@@ -26,10 +27,13 @@
     }
   },
   "containerEnv": {
-    "PIP_DISABLE_PIP_VERSION_CHECK": "1"
+    "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+    "NVIDIA_VISIBLE_DEVICES": "all",
+    "NVIDIA_DRIVER_CAPABILITIES": "compute,utility",
+    "PIP_EXTRA_INDEX_URL": "https://pypi.nvidia.com"
   },
   "mounts": [
-    "source=cs610-pip-cache,target=/home/vscode/.cache/pip,type=volume"
+    "source=celesify-pip-cache,target=/root/.cache/pip,type=volume"
   ],
   "forwardPorts": [8501],
   "portsAttributes": {
@@ -39,5 +43,5 @@
     }
   },
   "postCreateCommand": "bash .devcontainer/postCreate.sh",
-  "remoteUser": "vscode"
+  "remoteUser": "root"
 }

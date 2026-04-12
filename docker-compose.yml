@@ -1,8 +1,9 @@
 services:
   preprocessing:
     build:
-      context: ./services/preprocessing
-    image: cs610-stellar-preprocessing:latest
+      context: .
+      dockerfile: services/preprocessing/Dockerfile
+    image: celesify-preprocessing:latest
     environment:
       - KAGGLE_USERNAME
       - KAGGLE_KEY
@@ -10,14 +11,15 @@ services:
       - ./data:/workspace/data
       - shared_outputs:/workspace/outputs
     working_dir: /workspace
-    command: ["python", "/app/preprocess.py"]
 
   training:
     build:
-      context: ./services/training
+      context: .
+      dockerfile: services/training/Dockerfile
       args:
         BASE_IMAGE: ${TRAINING_BASE_IMAGE:-nvidia/cuda:12.4.1-devel-ubuntu22.04}
-    image: cs610-stellar-training:latest
+        INSTALL_GPU_DEPS: ${TRAINING_INSTALL_GPU_DEPS:-0}
+    image: celesify-training:latest
     gpus: all
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
@@ -25,18 +27,17 @@ services:
     volumes:
       - shared_outputs:/workspace/outputs
     working_dir: /workspace
-    command: ["python", "/app/train.py"]
 
   streamlit:
     build:
-      context: ./services/streamlit
-    image: cs610-stellar-streamlit:latest
+      context: .
+      dockerfile: services/streamlit/Dockerfile
+    image: celesify-streamlit:latest
     volumes:
       - shared_outputs:/workspace/outputs
     working_dir: /workspace
     ports:
       - "8501:8501"
-    command: ["streamlit", "run", "/app/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
     depends_on:
       - training
 

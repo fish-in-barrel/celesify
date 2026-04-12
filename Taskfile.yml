@@ -1,32 +1,77 @@
 version: "3"
 
 vars:
-  PYTHON_BIN: python3
-  VENV_DIR: venv
-  VENV_PIP: "{{.VENV_DIR}}/bin/pip"
+  RYE_BIN: rye
 
 tasks:
   default:
-    desc: Set up the local development environment.
+    desc: Sync the Rye-managed local development environment.
     deps:
-      - setup
+      - sync-all
 
-  venv:
-    desc: Create the local Python virtual environment if it does not exist.
+  rye:
+    desc: Verify Rye is installed.
     status:
-      - test -x "{{.VENV_DIR}}/bin/python"
+      - command -v {{.RYE_BIN}} >/dev/null 2>&1
     cmds:
-      - "{{.PYTHON_BIN}} -m venv {{.VENV_DIR}}"
+      - echo "Rye is required. Install from https://rye.astral.sh/ and retry."
+      - exit 1
 
-  install-requirements:
-    desc: Install the requirements for preprocessing, training, and Streamlit into the local venv.
+  sync-preprocess:
+    desc: Sync the Rye environment for preprocessing work.
     deps:
-      - venv
+      - rye
     cmds:
-      - "{{.VENV_PIP}} install --upgrade pip setuptools wheel"
-      - "{{.VENV_PIP}} install -r services/preprocessing/requirements.txt"
-      - "{{.VENV_PIP}} install -r services/training/requirements.txt"
-      - "{{.VENV_PIP}} install -r services/streamlit/requirements.txt"
+      - "{{.RYE_BIN}} sync --features preprocessing"
+
+  sync-train:
+    desc: Sync the Rye environment for training work (CPU + ONNX path).
+    deps:
+      - rye
+    cmds:
+      - "{{.RYE_BIN}} sync --features training-core --features training-onnx"
+
+  sync-train-gpu:
+    desc: Sync the Rye environment for training work with optional GPU deps.
+    deps:
+      - rye
+    cmds:
+      - "{{.RYE_BIN}} sync --features training-core --features training-onnx --features training-gpu"
+
+  sync-streamlit:
+    desc: Sync the Rye environment for streamlit work.
+    deps:
+      - rye
+    cmds:
+      - "{{.RYE_BIN}} sync --features streamlit"
+
+  sync-all:
+    desc: Sync the Rye environment with all service dependency groups.
+    deps:
+      - rye
+    cmds:
+      - "{{.RYE_BIN}} sync --features preprocessing --features training-core --features training-onnx --features streamlit"
+
+  run-preprocess:
+    desc: Run preprocessing through Rye.
+    deps:
+      - rye
+    cmds:
+      - "{{.RYE_BIN}} run preprocess"
+
+  run-train:
+    desc: Run training through Rye.
+    deps:
+      - rye
+    cmds:
+      - "{{.RYE_BIN}} run train"
+
+  run-streamlit:
+    desc: Run the Streamlit app through Rye.
+    deps:
+      - rye
+    cmds:
+      - "{{.RYE_BIN}} run streamlit"
 
   docker-build:
     desc: Build the Docker images defined in docker-compose.yml.
@@ -34,7 +79,7 @@ tasks:
       - docker compose build
 
   setup:
-    desc: Create the venv, install Python requirements, and build the Docker images.
+    desc: Sync the Rye environment and build Docker images.
     deps:
-      - install-requirements
+      - sync-all
       - docker-build
