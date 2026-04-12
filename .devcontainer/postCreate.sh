@@ -7,6 +7,12 @@ else
   SUDO=""
 fi
 
+if ! command -v ssh >/dev/null 2>&1; then
+  echo "Installing OpenSSH client"
+  ${SUDO} apt-get update
+  ${SUDO} apt-get install -y openssh-client
+fi
+
 if ! command -v direnv >/dev/null 2>&1; then
   echo "Installing direnv"
   ${SUDO} apt-get update
@@ -37,6 +43,19 @@ fi
 
 if [ -f "$HOME/.rye/env" ]; then
   . "$HOME/.rye/env"
+fi
+
+if ! command -v starship >/dev/null 2>&1; then
+  echo "Installing Starship"
+  if ! command -v curl >/dev/null 2>&1; then
+    ${SUDO} apt-get update
+    ${SUDO} apt-get install -y curl
+  fi
+  curl -fsSL https://starship.rs/install.sh | ${SUDO} sh -s -- -y -b /usr/local/bin
+fi
+
+if ! grep -q 'eval "$(starship init bash)"' "$HOME/.bashrc"; then
+  echo 'eval "$(starship init bash)"' >> "$HOME/.bashrc"
 fi
 
 echo "Syncing Rye-managed project environment"
