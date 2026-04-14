@@ -1,5 +1,8 @@
 # Copy this file to .envrc and replace placeholders with your Kaggle API credentials.
 # Do not commit .envrc; it is git-ignored.
 
+export LOCAL_UID="$(id -u)"
+export LOCAL_GID="$(id -g)"
+
 export KAGGLE_USERNAME="your_kaggle_username"
 export KAGGLE_KEY="your_kaggle_api_key"

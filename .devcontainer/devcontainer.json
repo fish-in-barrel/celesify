@@ -28,6 +28,7 @@
   "containerEnv": {
     "PIP_DISABLE_PIP_VERSION_CHECK": "1"
   },
+  "updateRemoteUserUID": true,
   "mounts": [
     "source=celesify-data-raw,target=${containerWorkspaceFolder}/data/raw,type=volume",
     "source=celesify-outputs-processed,target=${containerWorkspaceFolder}/outputs/processed,type=volume",

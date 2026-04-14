@@ -34,7 +34,8 @@ Notes:
 
 ## Environment Files (.envrc)
 
-Use `.envrc` for local secrets such as Kaggle credentials. The file is git-ignored.
+Use `.envrc` for local environment variables such as Kaggle credentials and the
+numeric UID/GID used by Docker Compose. The file is git-ignored.
 
 If you are not using the VS Code Dev Container, install `direnv` first (or source `.envrc` manually).
 
@@ -42,9 +43,13 @@ Quick setup:
 
 ```bash
 cp .envrc.template .envrc
-# edit .envrc and set KAGGLE_USERNAME / KAGGLE_KEY
+# edit .envrc and set KAGGLE_USERNAME / KAGGLE_KEY if needed
 direnv allow    # or source .envrc manually
 ```
+
+The template also exports `LOCAL_UID` and `LOCAL_GID` from the current shell, so
+`docker compose` runs the service containers with the same numeric user as your
+developer session.
 
 Preprocessing will use these values to download the dataset only when no CSV exists in `data/raw/`.
 
