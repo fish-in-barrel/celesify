@@ -46,6 +46,9 @@ def _extract_top_tuning_rows(
             {
                 "rank": safe_int(row.get("rank", idx)),
                 "cv_macro_f1": safe_float(row.get("mean_test_score", row.get("cv_macro_f1", 0.0))),
+                "cv_f1_std": safe_float(row.get("std_test_score", row.get("cv_f1_std", 0.0))),
+                "mean_fit_time_s": safe_float(row.get("mean_fit_time", row.get("mean_fit_time_s", 0.0))),
+                "mean_score_time_s": safe_float(row.get("mean_score_time", row.get("mean_score_time_s", 0.0))),
                 "n_estimators": params.get("n_estimators", row.get("n_estimators")),
                 "max_depth": params.get("max_depth", row.get("max_depth")),
                 "min_samples_split": params.get("min_samples_split", row.get("min_samples_split")),
@@ -69,6 +72,9 @@ def _extract_top_tuning_rows(
             {
                 "rank": 1,
                 "cv_macro_f1": safe_float(best_params.get("best_cv_score", 0.0)),
+                "cv_f1_std": 0.0,
+                "mean_fit_time_s": 0.0,
+                "mean_score_time_s": 0.0,
                 "n_estimators": best_only.get("n_estimators"),
                 "max_depth": best_only.get("max_depth"),
                 "min_samples_split": best_only.get("min_samples_split"),
@@ -163,7 +169,7 @@ def render_performance_metrics(
     best_params: dict[str, Any],
     feature_importance: dict[str, Any],
 ) -> None:
-    st.subheader("Performance and Metrics")
+    st.subheader("Model Evaluation")
     st.caption("Model outcomes reproduced from saved Training artifacts. The purpose of this view is to evaluate model performance and metrics to help with evaluating tuning and compare different approaches.")
 
     issues = validate_results_artifacts(baseline_metrics, tuned_metrics, feature_importance)
@@ -278,13 +284,54 @@ def render_performance_metrics(
     _render_fit_diagnostics(tuned_f1=tuned_f1, tuned_acc=tuned_acc, best_params=best_params)
 
     st.markdown("#### Hyperparameter Search Comparison")
-    st.caption("Top CV-ranked trial configurations from tuning. Rank 1 is the selected model shown above.")
+    st.caption("Top CV-ranked trial configurations from tuning. Useful differences often come from fit time, score stability, and score-time overhead, not just mean CV F1.")
     top_tuning_df, tuning_source = _extract_top_tuning_rows(best_params, tuned_metrics)
     if tuning_source == "best-only":
         st.info("Top-5 trial history is not present in saved artifacts; showing best available tuning snapshot.")
+    if "mean_fit_time_s" in top_tuning_df.columns:
+        top_tuning_df["f1_per_fit_second"] = top_tuning_df.apply(
+            lambda row: (safe_float(row.get("cv_macro_f1")) / safe_float(row.get("mean_fit_time_s")))
+            if safe_float(row.get("mean_fit_time_s")) > 0
+            else 0.0,
+            axis=1,
+        )
     st.dataframe(top_tuning_df, use_container_width=True)
 
-    if "cv_macro_f1" in top_tuning_df.columns:
+    if {"cv_macro_f1", "mean_fit_time_s"}.issubset(top_tuning_df.columns):
+        tradeoff_df = top_tuning_df.copy()
+        tradeoff_df["rank_label"] = tradeoff_df["rank"].astype(str)
+        fig_tradeoff = px.scatter(
+            tradeoff_df,
+            x="mean_fit_time_s",
+            y="cv_macro_f1",
+            color="rank_label",
+            size="n_estimators" if "n_estimators" in tradeoff_df.columns else None,
+            hover_data=["cv_f1_std", "mean_score_time_s", "max_depth", "class_weight"],
+            labels={
+                "mean_fit_time_s": "Mean Fit Time (s)",
+                "cv_macro_f1": "CV Macro F1",
+                "rank_label": "Rank",
+            },
+            title="CV Macro F1 vs Mean Fit Time",
+        )
+        fig_tradeoff.update_layout(template="plotly_white", height=320, margin={"l": 36, "r": 18, "t": 46, "b": 36})
+        st.plotly_chart(fig_tradeoff, use_container_width=True, key="top_tuning_tradeoff")
+
+    if {"rank", "cv_f1_std"}.issubset(top_tuning_df.columns):
+        stability_df = top_tuning_df.copy()
+        stability_df["rank_label"] = stability_df["rank"].astype(str)
+        fig_stability = px.bar(
+            stability_df,
+            x="rank_label",
+            y="cv_f1_std",
+            title="CV Stability by Hyperparameter Rank (Std of CV Macro F1)",
+            labels={"rank_label": "Rank", "cv_f1_std": "CV Macro F1 Std"},
+            color_discrete_sequence=["#f4a261"],
+        )
+        fig_stability.update_layout(template="plotly_white", height=300, margin={"l": 36, "r": 18, "t": 46, "b": 36})
+        st.plotly_chart(fig_stability, use_container_width=True, key="top_tuning_stability")
+
+    if "cv_macro_f1" in top_tuning_df.columns and "mean_fit_time_s" not in top_tuning_df.columns:
         cv_plot_df = top_tuning_df.copy()
         cv_plot_df["rank_label"] = cv_plot_df["rank"].astype(str)
         fig_top = px.bar(

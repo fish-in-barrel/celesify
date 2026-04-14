@@ -47,7 +47,7 @@ def run() -> None:
         st.error(f"Failed to load model.joblib: {exc}")
 
     tab_explorer, tab_metrics, tab_infer = st.tabs(
-        ["Data Exploration", "Performance and Metrics", "Upload and Infer"]
+        ["Data Exploration", "Model Evaluation", "Upload and Infer"]
     )
 
     with tab_explorer:

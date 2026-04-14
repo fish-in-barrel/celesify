@@ -1,7 +1,7 @@
 [project]
 name = "celesify"
 version = "0.1.0"
-description = "Stellar classification pipeline with modular services"
+description = "Celestial classification pipeline with modular services"
 readme = "CLAUDE.md"
 requires-python = ">=3.11"
 dependencies = [

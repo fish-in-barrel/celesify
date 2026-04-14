@@ -254,6 +254,10 @@ def run() -> None:
     ranks = np.asarray(cv_results.get("rank_test_score", []), dtype=float)
     mean_scores = np.asarray(cv_results.get("mean_test_score", []), dtype=float)
     std_scores = np.asarray(cv_results.get("std_test_score", []), dtype=float)
+    mean_fit_times = np.asarray(cv_results.get("mean_fit_time", []), dtype=float)
+    std_fit_times = np.asarray(cv_results.get("std_fit_time", []), dtype=float)
+    mean_score_times = np.asarray(cv_results.get("mean_score_time", []), dtype=float)
+    std_score_times = np.asarray(cv_results.get("std_score_time", []), dtype=float)
     params_list = cast(list[dict[str, Any]], cv_results.get("params", []))
 
     top_5_results: list[dict[str, Any]] = []
@@ -266,6 +270,10 @@ def run() -> None:
                     "rank": int(ranks[int(idx)]) if len(ranks) > int(idx) else rank_position,
                     "mean_test_score": float(mean_scores[int(idx)]),
                     "std_test_score": float(std_scores[int(idx)]) if len(std_scores) > int(idx) else 0.0,
+                    "mean_fit_time": float(mean_fit_times[int(idx)]) if len(mean_fit_times) > int(idx) else 0.0,
+                    "std_fit_time": float(std_fit_times[int(idx)]) if len(std_fit_times) > int(idx) else 0.0,
+                    "mean_score_time": float(mean_score_times[int(idx)]) if len(mean_score_times) > int(idx) else 0.0,
+                    "std_score_time": float(std_score_times[int(idx)]) if len(std_score_times) > int(idx) else 0.0,
                     "params": as_jsonable(params),
                 }
             )

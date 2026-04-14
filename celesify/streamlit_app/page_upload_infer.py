@@ -8,6 +8,18 @@ import streamlit as st
 from celesify.streamlit_app.common import inverse_class_mapping, safe_int
 
 
+FEATURE_LABELS: dict[str, str] = {
+    "alpha": "alpha (right ascension, degrees)",
+    "delta": "delta (declination, degrees)",
+    "u": "u (ultraviolet magnitude, mag)",
+    "g": "g (green magnitude, mag)",
+    "r": "r (red magnitude, mag)",
+    "i": "i (infrared magnitude, mag)",
+    "z": "z (far-infrared magnitude, mag)",
+    "redshift": "redshift (unitless)",
+}
+
+
 def _infer_feature_columns(tuned_metrics: dict[str, Any]) -> list[str]:
     columns = tuned_metrics.get("feature_columns", [])
     if isinstance(columns, list) and columns:
@@ -46,7 +58,8 @@ def render_upload_and_infer(model: Any, tuned_metrics: dict[str, Any]) -> None:
             values: dict[str, float] = {}
             cols = st.columns(2)
             for idx, feature in enumerate(feature_columns):
-                values[feature] = cols[idx % 2].number_input(feature, value=0.0, format="%.6f")
+                label = FEATURE_LABELS.get(feature, feature)
+                values[feature] = cols[idx % 2].number_input(label, value=0.0, format="%.6f")
             submitted = st.form_submit_button("Predict")
 
         if submitted:

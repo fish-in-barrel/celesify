@@ -177,7 +177,7 @@ def render_banner() -> None:
             </a>
             <div class="celesify-banner-content">
                 <a class="celesify-banner-title" href="/" target="_self" onclick="window.location.assign('/'); return false;">celesify</a>
-                <p class="celesify-banner-subtitle">Machine Learning stellar classification model dashboard: explorer, results, and inference</p>
+                <p class="celesify-banner-subtitle">Machine Learning celestial classification model dashboard: explore, evaluate, and infer.</p>
             </div>
             <p class="celesify-banner-attribution">{MILKY_WAY_ATTRIBUTION}</p>
         </section>

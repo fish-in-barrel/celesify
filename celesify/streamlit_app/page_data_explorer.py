@@ -54,6 +54,9 @@ def render_data_explorer(inverse_map: dict[int, str]) -> None:
 
     distribution_plot_specs: list[tuple[str, Callable[[], go.Figure], str]] = []
 
+    st.markdown("#### Distributions")
+    st.caption("These plots show how often each class and feature value appears. Look for class imbalance, skewed feature ranges, and unusual tails or outliers.")
+
     def class_distribution_figure() -> go.Figure:
         fig = px.bar(class_df, x="Class", y="Count", color_discrete_sequence=["#3e8e7e"])
         fig.update_layout(title="Class Distribution")
@@ -89,11 +92,11 @@ def render_data_explorer(inverse_map: dict[int, str]) -> None:
 
             distribution_plot_specs.append((f"Distribution: {feature}", feature_histogram_figure, f"hist_{feature}"))
 
-    st.markdown("#### Distributions")
     if distribution_plot_specs:
         render_plot_grid(distribution_plot_specs, columns=3, chart_height=245)
 
     st.markdown("#### Correlation")
+    st.caption("This heatmap shows which photometric features move together. Strong positive or negative correlations can indicate redundant information or useful feature relationships.")
     include_redshift = st.checkbox("Include redshift in correlation heatmap", value=False, key="explorer_include_redshift")
     corr_features = [col for col in PHOTOMETRIC_BANDS if col in sampled.columns]
     if include_redshift and "redshift" in sampled.columns:
@@ -107,7 +110,7 @@ def render_data_explorer(inverse_map: dict[int, str]) -> None:
         def correlation_figure() -> go.Figure:
             fig = px.imshow(
                 corr_display,
-                text_auto=".2f",
+                text_auto=True,
                 color_continuous_scale="Viridis",
                 aspect="equal",
             )
@@ -135,6 +138,7 @@ def render_data_explorer(inverse_map: dict[int, str]) -> None:
     ]
 
     st.markdown("#### Univariate Exploration")
+    st.caption("These boxplots compare the spread of each feature across classes. They help reveal which variables separate classes well and where class distributions overlap.")
     uni_defaults = [col for col in ["u", "g", "r", "i", "z", "redshift"] if col in numeric_features][:4]
     univariate_features = st.multiselect(
         "Features for univariate analysis",
@@ -177,6 +181,7 @@ def render_data_explorer(inverse_map: dict[int, str]) -> None:
         st.info("Select at least one feature for univariate exploration.")
 
     st.markdown("#### Multivariate Analysis")
+    st.caption("The pair matrix shows feature relationships two at a time. Off-diagonal scatter plots highlight class separation and interactions, while diagonal density curves show each feature’s distribution by class.")
     pair_defaults = [col for col in ["u", "g", "r", "i"] if col in numeric_features]
     pair_features = st.multiselect(
         "Features for pair plot",
@@ -225,7 +230,7 @@ def render_data_explorer(inverse_map: dict[int, str]) -> None:
             fig_pair = make_subplots(
                 rows=n_features,
                 cols=n_features,
-                shared_xaxes="columns",
+                shared_xaxes=True,
                 shared_yaxes=False,
                 horizontal_spacing=0.02,
                 vertical_spacing=0.02,
@@ -235,12 +240,13 @@ def render_data_explorer(inverse_map: dict[int, str]) -> None:
                 for col_idx, col_feature in enumerate(pair_features, start=1):
                     if row_idx == col_idx:
                         for class_label in class_labels:
-                            class_vals = (
-                                pair_df.loc[pair_df["class_label"] == class_label, row_feature]
-                                .astype(float)
-                                .dropna()
-                                .to_numpy()
+                            class_series = pd.Series(
+                                pd.to_numeric(
+                                    pair_df.loc[pair_df["class_label"] == class_label, row_feature],
+                                    errors="coerce",
+                                )
                             )
+                            class_vals = class_series.dropna().to_numpy()
                             kde_vals = _kde_curve(class_vals)
                             if kde_vals is None:
                                 continue
