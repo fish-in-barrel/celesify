@@ -5,6 +5,7 @@ import streamlit as st
 from celesify.core.logging import log
 from celesify.streamlit_app.common import (
     MODELS_DIR,
+    PROCESSED_DIR,
     SERVICE,
     inverse_class_mapping,
     load_json,
@@ -23,15 +24,19 @@ def run() -> None:
     render_banner()
 
     baseline_metrics: dict = {}
+    clean_tuned_metrics: dict = {}
     tuned_metrics: dict = {}
     best_params: dict = {}
     feature_importance: dict = {}
+    preprocessing_report: dict = {}
 
     try:
         baseline_metrics = load_json(str(MODELS_DIR / "baseline_metrics.json"))
+        clean_tuned_metrics = load_json(str(MODELS_DIR / "clean_tuned_metrics.json"))
         tuned_metrics = load_json(str(MODELS_DIR / "tuned_metrics.json"))
         best_params = load_json(str(MODELS_DIR / "best_params.json"))
         feature_importance = load_json(str(MODELS_DIR / "feature_importance.json"))
+        preprocessing_report = load_json(str(PROCESSED_DIR / "preprocessing_report.json"))
     except FileNotFoundError as exc:
         st.warning(str(exc))
 
@@ -51,13 +56,10 @@ def run() -> None:
     )
 
     with tab_explorer:
-        render_data_explorer(inverse_map)
+        render_data_explorer(inverse_map, preprocessing_report)
 
     with tab_metrics:
-        if baseline_metrics and tuned_metrics and best_params and feature_importance:
-            render_performance_metrics(baseline_metrics, tuned_metrics, best_params, feature_importance)
-        else:
-            st.info("Results artifacts are not fully available yet.")
+        render_performance_metrics(baseline_metrics, clean_tuned_metrics, tuned_metrics, best_params, feature_importance)
 
     with tab_infer:
         if model is None:

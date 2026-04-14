@@ -13,26 +13,89 @@ from celesify.core.constants import TARGET_COLUMN
 from celesify.streamlit_app.common import PHOTOMETRIC_BANDS, PROCESSED_DIR, load_parquet, render_plot_grid, safe_int
 
 
-def _select_explorer_frame() -> pd.DataFrame:
+def _select_explorer_frame(dataset_variant: str) -> pd.DataFrame:
+    clean_train_path = PROCESSED_DIR / "train_clean.parquet"
+    clean_test_path = PROCESSED_DIR / "test_clean.parquet"
     train_path = PROCESSED_DIR / "train.parquet"
     test_path = PROCESSED_DIR / "test.parquet"
 
-    if train_path.exists():
-        return load_parquet(str(train_path))
-    if test_path.exists():
-        return load_parquet(str(test_path))
+    if dataset_variant == "cleaned":
+        if clean_train_path.exists():
+            return load_parquet(str(clean_train_path))
+        if clean_test_path.exists():
+            return load_parquet(str(clean_test_path))
+        if train_path.exists():
+            return load_parquet(str(train_path))
+        if test_path.exists():
+            return load_parquet(str(test_path))
+    else:
+        if train_path.exists():
+            return load_parquet(str(train_path))
+        if test_path.exists():
+            return load_parquet(str(test_path))
+        if clean_train_path.exists():
+            return load_parquet(str(clean_train_path))
+        if clean_test_path.exists():
+            return load_parquet(str(clean_test_path))
+
     raise FileNotFoundError("No parquet files found for Data Explorer.")
 
 
-def render_data_explorer(inverse_map: dict[int, str]) -> None:
+def render_data_explorer(inverse_map: dict[int, str], preprocess_report: dict | None = None) -> None:
     st.subheader("Data Exploration")
     st.caption("Class distribution, univariate/multivariate analysis, and correlations from processed parquet. The intent of this view is to provide a view of the data to help make decisions on refining the model and identifying opportunities for feature engineering.")
 
+    comparison = preprocess_report.get("dataset_comparison", {}) if isinstance(preprocess_report, dict) and isinstance(preprocess_report.get("dataset_comparison", {}), dict) else {}
+    rows_removed = preprocess_report.get("rows_removed_by_reason", {}) if isinstance(preprocess_report, dict) and isinstance(preprocess_report.get("rows_removed_by_reason", {}), dict) else {}
+    clean_dataset = preprocess_report.get("clean_dataset", {}) if isinstance(preprocess_report, dict) and isinstance(preprocess_report.get("clean_dataset", {}), dict) else {}
+    engineered_dataset = preprocess_report.get("engineered_dataset", {}) if isinstance(preprocess_report, dict) and isinstance(preprocess_report.get("engineered_dataset", {}), dict) else {}
+
+    st.markdown("#### Preprocessing Comparison")
+    st.caption("Cleaning is applied before feature engineering. Use the toggle to analyze either the cleaned baseline dataset or engineered dataset.")
+    prep_cols = st.columns(4)
+    prep_cols[0].metric("Rows removed", f"{safe_int(rows_removed.get('total', 0)):,}")
+    prep_cols[1].metric("Dropped missing", f"{safe_int(rows_removed.get('missing', 0)):,}")
+    prep_cols[2].metric("Dropped malformed", f"{safe_int(rows_removed.get('malformed', 0)):,}")
+    prep_cols[3].metric("Feature delta", f"{safe_int(comparison.get('feature_count_delta', 0)):+d}")
+
+    prep_table = pd.DataFrame(
+        [
+            {
+                "stage": "cleaned baseline",
+                "feature_count": safe_int(clean_dataset.get("feature_count", 0)),
+                "train_rows": safe_int(clean_dataset.get("train_rows", 0)),
+                "test_rows": safe_int(clean_dataset.get("test_rows", 0)),
+            },
+            {
+                "stage": "engineered tuned",
+                "feature_count": safe_int(engineered_dataset.get("feature_count", 0)),
+                "train_rows": safe_int(engineered_dataset.get("train_rows", 0)),
+                "test_rows": safe_int(engineered_dataset.get("test_rows", 0)),
+            },
+        ]
+    )
+    st.dataframe(prep_table, use_container_width=True)
+
+    added_features = comparison.get("engineered_columns_added", []) if isinstance(comparison.get("engineered_columns_added", []), list) else []
+    if added_features:
+        with st.expander("Engineered features"):
+            st.write(", ".join(str(feature) for feature in added_features))
+
+    dataset_label = st.radio(
+        "Dataset for analysis",
+        options=["Cleaned baseline", "Engineered"],
+        horizontal=True,
+        key="explorer_dataset_variant",
+    )
+    dataset_variant = "cleaned" if dataset_label == "Cleaned baseline" else "engineered"
+
     try:
-        df = _select_explorer_frame()
+        df = _select_explorer_frame(dataset_variant)
     except FileNotFoundError as exc:
         st.warning(str(exc))
         return
+
+    st.caption(f"Active dataset: {dataset_label}")
 
     if TARGET_COLUMN not in df.columns:
         st.error(f"Expected target column '{TARGET_COLUMN}' in parquet data.")

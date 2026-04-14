@@ -152,6 +152,11 @@ how F1 is reported in the paper. Make the call here and document it.
 - Imbalance handling direction: recommend `class_weight='balanced'` when majority/minority ratio > 2.0.
 - Transform policy: compute and log skew for numeric columns; no log transform currently applied.
 
+**External references for feature engineering:**
+- [Carrasco et al. (2015)](https://arxiv.org/abs/1405.5298) used Random Forests for photometric quasar classification and improved precision/recall by adding GALEX NUV and WISE W1/W2 bands on top of broadband magnitudes and colors. Takeaway: build explicit color features first, then add UV/IR bands if they are available.
+- [Wu et al. (2012)](https://arxiv.org/abs/1204.6197) derived color-redshift relations for SDSS-WISE quasars and used a `z-W1` versus `g-z` color-color criterion to separate quasars from stars. Takeaway: engineer color-color features and redshift interactions, especially where galaxy/QSO overlap is strongest.
+- [Hickox et al. (2017)](https://arxiv.org/abs/1709.04468) showed that optical-IR and mid-IR colors help identify obscured quasars that are difficult to recover from optical photometry alone. Takeaway: when host-galaxy contamination or dust is a concern, add optical-IR color contrasts rather than relying only on raw magnitudes.
+
 ### Phase 3 — Modelling & tuning (Days 3–6)
 Work happens in `services/training/train.py`.
 

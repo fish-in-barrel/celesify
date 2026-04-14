@@ -262,8 +262,14 @@ def validate_results_artifacts(
 
     baseline_features = baseline_metrics.get("feature_columns", [])
     tuned_features = tuned_metrics.get("feature_columns", [])
+    feature_engineering = tuned_metrics.get("feature_engineering", {})
+    engineered_outputs = isinstance(feature_engineering, dict) and feature_engineering.get("status") == "completed"
     if baseline_features != tuned_features:
-        issues.append("Feature column order differs between baseline and tuned metrics.")
+        if engineered_outputs:
+            if not isinstance(baseline_features, list) or not isinstance(tuned_features, list) or not set(baseline_features).issubset(set(tuned_features)):
+                issues.append("Feature column sets do not match the engineered baseline/tuned comparison metadata.")
+        else:
+            issues.append("Feature column order differs between baseline and tuned metrics.")
 
     return issues
 
