@@ -250,6 +250,26 @@ def run() -> None:
     )
     search.fit(x_train, y_train)
 
+    cv_results = cast(dict[str, Any], search.cv_results_)
+    ranks = np.asarray(cv_results.get("rank_test_score", []), dtype=float)
+    mean_scores = np.asarray(cv_results.get("mean_test_score", []), dtype=float)
+    std_scores = np.asarray(cv_results.get("std_test_score", []), dtype=float)
+    params_list = cast(list[dict[str, Any]], cv_results.get("params", []))
+
+    top_5_results: list[dict[str, Any]] = []
+    if len(params_list) > 0 and len(mean_scores) == len(params_list):
+        order = np.argsort(-mean_scores)
+        for rank_position, idx in enumerate(order[:5], start=1):
+            params = params_list[int(idx)] if int(idx) < len(params_list) else {}
+            top_5_results.append(
+                {
+                    "rank": int(ranks[int(idx)]) if len(ranks) > int(idx) else rank_position,
+                    "mean_test_score": float(mean_scores[int(idx)]),
+                    "std_test_score": float(std_scores[int(idx)]) if len(std_scores) > int(idx) else 0.0,
+                    "params": as_jsonable(params),
+                }
+            )
+
     best_params = cast(dict[str, Any], search.best_params_)
 
     best_params_payload = {
@@ -260,9 +280,22 @@ def run() -> None:
         "best_cv_score": float(search.best_score_),
         "search_backend": "sklearn_cpu",
         "best_params": best_params,
+        "top_5_results": top_5_results,
     }
     write_json(models_dir / "best_params.json", as_jsonable(best_params_payload))
     log(SERVICE, "Wrote best_params.json")
+
+    write_json(
+        models_dir / "top_trials.json",
+        {
+            "status": "completed",
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "scoring": "f1_macro",
+            "n_iter_used": n_iter_used,
+            "top_5_results": top_5_results,
+        },
+    )
+    log(SERVICE, "Wrote top_trials.json")
 
     tuned_model = SklearnRandomForestClassifier(random_state=RANDOM_STATE, n_jobs=n_jobs, **best_params)
     tuned_model.fit(x_train, y_train)

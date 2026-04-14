@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges" role="img" aria-label="celesify pixel galaxy favicon">
+  <rect width="32" height="32" fill="#050914"/>
+
+  <rect x="6" y="4" width="2" height="8" fill="#fff6da"/>
+  <rect x="3" y="7" width="8" height="2" fill="#fff6da"/>
+  <rect x="6" y="7" width="2" height="2" fill="#ffffff"/>
+
+  <rect x="26" y="25" width="2" height="6" fill="#fff6da"/>
+  <rect x="24" y="27" width="6" height="2" fill="#fff6da"/>
+  <rect x="26" y="27" width="2" height="2" fill="#ffffff"/>
+
+  <g transform="translate(-2 -2)">
+  <rect x="27" y="12" width="3" height="3" fill="#3f82ff"/>
+  <rect x="25" y="14" width="3" height="3" fill="#2f66ea"/>
+  <rect x="24" y="15" width="3" height="3" fill="#2f66ea"/>
+  <rect x="26" y="13" width="3" height="3" fill="#3f82ff"/>
+  <rect x="22" y="17" width="3" height="3" fill="#3f82ff"/>
+  <rect x="18" y="21" width="3" height="3" fill="#7fffd6"/>
+  <rect x="16" y="23" width="3" height="3" fill="#67d7ff"/>
+  <rect x="14" y="25" width="3" height="3" fill="#3f82ff"/>
+  <rect x="12" y="27" width="3" height="3" fill="#2f66ea"/>
+  <rect x="11" y="28" width="3" height="3" fill="#2f66ea"/>
+  <rect x="10" y="29" width="3" height="3" fill="#3f82ff"/>
+  <rect x="9" y="30" width="3" height="3" fill="#3f82ff"/>
+
+  <rect x="23" y="18" width="3" height="3" fill="#3f82ff"/>
+  <rect x="20" y="17" width="3" height="3" fill="#67d7ff"/>
+  <rect x="21" y="16" width="3" height="3" fill="#67d7ff"/>
+  <rect x="22" y="15" width="3" height="3" fill="#67d7ff"/>
+  <rect x="23" y="14" width="3" height="3" fill="#67d7ff"/>
+  <rect x="23" y="19" width="3" height="3" fill="#67d7ff"/>
+  <rect x="21" y="20" width="3" height="3" fill="#c5f5ff"/>
+  <rect x="19" y="22" width="3" height="3" fill="#eefbff"/>
+  <rect x="17" y="24" width="3" height="3" fill="#c5f5ff"/>
+  <rect x="15" y="26" width="3" height="3" fill="#3f82ff"/>
+  <rect x="14" y="27" width="3" height="3" fill="#67d7ff"/>
+  <rect x="13" y="28" width="3" height="3" fill="#67d7ff"/>
+
+  <rect x="20" y="16" width="3" height="3" fill="#3f82ff"/>
+  <rect x="18" y="18" width="3" height="3" fill="#c5f5ff"/>
+  <rect x="16" y="20" width="3" height="3" fill="#eefbff"/>
+  <rect x="14" y="22" width="3" height="3" fill="#c5f5ff"/>
+
+  <rect x="18" y="21" width="3" height="3" fill="#ffd58a"/>
+  <rect x="20" y="20" width="2" height="2" fill="#ffffff"/>
+  </g>
+</svg>

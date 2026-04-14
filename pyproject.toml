@@ -27,6 +27,7 @@ training-onnx = [
 streamlit = [
   "joblib==1.4.2",
   "matplotlib==3.8.4",
+  "plotly==5.24.1",
   "scikit-learn==1.5.1",
   "seaborn==0.13.2",
   "streamlit==1.33.0",
@@ -45,4 +46,4 @@ managed = true
 [tool.rye.scripts]
 preprocess = "python -m celesify.preprocessing.main"
 train = "python -m celesify.training.main"
-streamlit = "python -m streamlit run celesify/streamlit_app/main.py --server.address=0.0.0.0 --server.port=8501"
+streamlit-app = "python -m streamlit run celesify/streamlit_app/main.py --server.address=0.0.0.0 --server.port=8501"

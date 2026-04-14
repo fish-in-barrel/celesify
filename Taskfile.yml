@@ -64,7 +64,12 @@ tasks:
     deps:
       - rye
     cmds:
-      - "{{.RYE_BIN}} run streamlit"
+      - "{{.RYE_BIN}} run streamlit-app"
+
+  kill-streamlit:
+    desc: Kill the Streamlit app process.
+    cmds:
+      - pkill -f "streamlit run celesify/streamlit_app/main.py" || true
 
   docker-build:
     desc: Build the Docker images defined in docker-compose.yml.
