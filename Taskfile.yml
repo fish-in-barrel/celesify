@@ -31,13 +31,6 @@ tasks:
     cmds:
       - "{{.RYE_BIN}} sync --features training-core --features training-onnx"
 
-  sync-train-gpu:
-    desc: Sync the Rye environment for training work with optional GPU deps.
-    deps:
-      - rye
-    cmds:
-      - "{{.RYE_BIN}} sync --features training-core --features training-onnx --features training-gpu"
-
   sync-streamlit:
     desc: Sync the Rye environment for streamlit work.
     deps:

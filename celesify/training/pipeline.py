@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier as SklearnRandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
-from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold, cross_val_score
+from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold
 from skl2onnx import convert_sklearn
 from skl2onnx.common.data_types import FloatTensorType
 
@@ -22,11 +22,6 @@ from celesify.core.logging import log
 from celesify.core.paths import resolve_training_paths
 
 SERVICE = "training"
-
-try:
-    from cuml.ensemble import RandomForestClassifier as CumlRandomForestClassifier  # type: ignore[reportMissingImports]
-except Exception:
-    CumlRandomForestClassifier = None
 
 
 DEFAULT_CLASS_MAP = CLASS_ENCODING
@@ -105,14 +100,6 @@ def evaluate_model(model: Any, x_test: pd.DataFrame, y_test: pd.Series) -> dict[
     }
 
 
-def try_import_cuml() -> bool:
-    return CumlRandomForestClassifier is not None
-
-
-def is_cuml_estimator(model: Any) -> bool:
-    return model.__class__.__module__.startswith("cuml.")
-
-
 def get_int_env(name: str, default: int) -> int:
     raw = os.getenv(name)
     if raw is None:
@@ -122,10 +109,6 @@ def get_int_env(name: str, default: int) -> int:
     except ValueError:
         log(SERVICE, f"Invalid {name}={raw!r}; using default {default}.")
         return default
-
-
-def supports_class_weight(estimator_cls: type[Any]) -> bool:
-    return estimator_cls is SklearnRandomForestClassifier
 
 
 def run() -> None:
@@ -153,7 +136,6 @@ def run() -> None:
         return
 
     log(SERVICE, f"Using random_state={RANDOM_STATE} and class labels={CLASS_LABEL_ORDER}")
-    log(SERVICE, f"cuML available: {try_import_cuml()}")
 
     preprocess_report = {}
     if report_file.exists():
@@ -216,7 +198,11 @@ def run() -> None:
         y_train = train_df["class"].astype(int)
         log(SERVICE, f"Applied TRAINING_MAX_TRAIN_ROWS={max_train_rows}; sampled train rows={len(train_df)}")
 
-    baseline_model = SklearnRandomForestClassifier(n_estimators=100, random_state=RANDOM_STATE)
+    baseline_model = SklearnRandomForestClassifier(
+        n_estimators=100,
+        random_state=RANDOM_STATE,
+        n_jobs=n_jobs,
+    )
     log(SERVICE, "Training baseline RandomForestClassifier.")
     baseline_model.fit(x_train, y_train)
 
@@ -242,31 +228,18 @@ def run() -> None:
         "max_depth": [None, 10, 20, 30],
         "min_samples_split": [2, 5, 10],
         "max_features": ["sqrt", "log2", 0.3],
+        "class_weight": class_weight_space,
     }
-    top_k = max(1, get_int_env("TRAINING_TOP_K", 3))
-
-    broad_search_backend = "cuml" if try_import_cuml() else "sklearn"
-    broad_estimator_cls: type[Any] = (
-        cast(type[Any], CumlRandomForestClassifier)
-        if broad_search_backend == "cuml"
-        else SklearnRandomForestClassifier
-    )
-
-    broad_param_distributions = dict(param_distributions)
-    if supports_class_weight(broad_estimator_cls):
-        broad_param_distributions["class_weight"] = class_weight_space
-    else:
-        log(SERVICE, "cuML broad search detected: omitting unsupported 'class_weight' search parameter.")
 
     log(
         SERVICE,
-        "Starting broad RandomizedSearchCV "
-        f"backend={broad_search_backend}, n_iter={n_iter_used}, cv={cv_splits}, n_jobs={n_jobs}, "
+        "Starting RandomizedSearchCV "
+        f"backend=sklearn_cpu, n_iter={n_iter_used}, cv={cv_splits}, n_jobs={n_jobs}, "
         f"class_weight_space={class_weight_space}",
     )
     search = RandomizedSearchCV(
-        estimator=broad_estimator_cls(random_state=RANDOM_STATE),
-        param_distributions=broad_param_distributions,
+        estimator=SklearnRandomForestClassifier(random_state=RANDOM_STATE, n_jobs=n_jobs),
+        param_distributions=param_distributions,
         n_iter=n_iter_used,
         scoring="f1_macro",
         cv=StratifiedKFold(n_splits=cv_splits, shuffle=True, random_state=RANDOM_STATE),
@@ -275,126 +248,23 @@ def run() -> None:
         refit=True,
         verbose=1,
     )
-    try:
-        search.fit(x_train, y_train)
-    except Exception as exc:
-        if broad_search_backend == "cuml":
-            log(SERVICE, f"cuML broad search failed ({type(exc).__name__}); retrying broad search with sklearn.")
-            broad_search_backend = "sklearn_fallback"
-            broad_param_distributions = dict(param_distributions)
-            broad_param_distributions["class_weight"] = class_weight_space
-            search = RandomizedSearchCV(
-                estimator=SklearnRandomForestClassifier(random_state=RANDOM_STATE),
-                param_distributions=broad_param_distributions,
-                n_iter=n_iter_used,
-                scoring="f1_macro",
-                cv=StratifiedKFold(n_splits=cv_splits, shuffle=True, random_state=RANDOM_STATE),
-                n_jobs=n_jobs,
-                random_state=RANDOM_STATE,
-                refit=True,
-                verbose=1,
-            )
-            search.fit(x_train, y_train)
-        else:
-            raise
+    search.fit(x_train, y_train)
 
-    ranked_candidates: list[dict[str, Any]] = []
-    cv_results = getattr(search, "cv_results_", None)
-    if isinstance(cv_results, dict) and "rank_test_score" in cv_results and "params" in cv_results:
-        candidates = list(zip(cv_results["rank_test_score"], cv_results["params"], cv_results["mean_test_score"]))
-        candidates.sort(key=lambda item: item[0])
-        ranked_candidates = [
-            {
-                "rank": int(rank),
-                "params": cast(dict[str, Any], params),
-                "mean_test_score": float(mean_score),
-            }
-            for rank, params, mean_score in candidates[:top_k]
-        ]
-    else:
-        ranked_candidates = [
-            {
-                "rank": 1,
-                "params": cast(dict[str, Any], search.best_params_),
-                "mean_test_score": float(search.best_score_),
-            }
-        ]
-
-    confirmation_grid: list[dict[str, Any]] = []
-    for candidate in ranked_candidates:
-        base_params = dict(candidate["params"])
-        if "class_weight" in base_params:
-            confirmation_grid.append(base_params)
-            continue
-
-        if imbalance_flagged:
-            for cw in class_weight_space:
-                p = dict(base_params)
-                p["class_weight"] = cw
-                confirmation_grid.append(p)
-        else:
-            p = dict(base_params)
-            p["class_weight"] = None
-            confirmation_grid.append(p)
-
-    seen_param_keys: set[str] = set()
-    unique_confirmation_grid: list[dict[str, Any]] = []
-    for params in confirmation_grid:
-        key = json.dumps(as_jsonable(params), sort_keys=True)
-        if key in seen_param_keys:
-            continue
-        seen_param_keys.add(key)
-        unique_confirmation_grid.append(params)
-
-    log(
-        SERVICE,
-        "Starting sklearn CPU confirmation on shortlisted candidates "
-        f"(top_k={top_k}, candidates={len(unique_confirmation_grid)}).",
-    )
-    best_confirm_score = -1.0
-    best_confirm_params: dict[str, Any] = {}
-    confirmation_results: list[dict[str, Any]] = []
-    for params in unique_confirmation_grid:
-        sklearn_model = SklearnRandomForestClassifier(random_state=RANDOM_STATE, **params)
-        scores = cross_val_score(
-            sklearn_model,
-            x_train,
-            y_train,
-            scoring="f1_macro",
-            cv=StratifiedKFold(n_splits=cv_splits, shuffle=True, random_state=RANDOM_STATE),
-            n_jobs=n_jobs,
-        )
-        mean_score = float(np.mean(scores))
-        confirmation_results.append({"params": params, "mean_cv_f1_macro": mean_score})
-        if mean_score > best_confirm_score:
-            best_confirm_score = mean_score
-            best_confirm_params = params
-
-    if not best_confirm_params:
-        best_confirm_params = cast(dict[str, Any], search.best_params_)
-        if "class_weight" not in best_confirm_params:
-            best_confirm_params["class_weight"] = class_weight_space[-1] if imbalance_flagged else None
+    best_params = cast(dict[str, Any], search.best_params_)
 
     best_params_payload = {
         "status": "completed",
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "n_iter_used": n_iter_used,
-        "top_k_used": top_k,
         "scoring": "f1_macro",
         "best_cv_score": float(search.best_score_),
-        "broad_search_backend": broad_search_backend,
-        "best_params_broad_search": search.best_params_,
-        "best_broad_cv_score": float(search.best_score_),
-        "best_params": best_confirm_params,
-        "best_params_confirmed_cpu": best_confirm_params,
-        "best_confirmed_cpu_cv_score": best_confirm_score,
-        "shortlist": ranked_candidates,
-        "cpu_confirmation_results": confirmation_results,
+        "search_backend": "sklearn_cpu",
+        "best_params": best_params,
     }
     write_json(models_dir / "best_params.json", as_jsonable(best_params_payload))
     log(SERVICE, "Wrote best_params.json")
 
-    tuned_model = SklearnRandomForestClassifier(random_state=RANDOM_STATE, **best_confirm_params)
+    tuned_model = SklearnRandomForestClassifier(random_state=RANDOM_STATE, n_jobs=n_jobs, **best_params)
     tuned_model.fit(x_train, y_train)
     tuned_eval = evaluate_model(tuned_model, x_test, y_test)
     tuned_payload = {
@@ -409,14 +279,10 @@ def run() -> None:
             "test": list(x_test.shape),
         },
         "n_iter_used": n_iter_used,
-        "top_k_used": top_k,
         "cv_splits": cv_splits,
         "n_jobs": n_jobs,
-        "search_backend": broad_search_backend,
-        "best_params": best_confirm_params,
-        "best_params_broad_search": search.best_params_,
-        "best_broad_cv_score": float(search.best_score_),
-        "best_confirmed_cpu_cv_score": best_confirm_score,
+        "search_backend": "sklearn_cpu",
+        "best_params": best_params,
         **tuned_eval,
     }
     write_json(models_dir / "tuned_metrics.json", as_jsonable(tuned_payload))
@@ -453,24 +319,8 @@ def run() -> None:
     onnx_error_log = models_dir / "onnx_export_error.log"
 
     try:
-        onnx_export_estimator = tuned_model
-        if is_cuml_estimator(tuned_model):
-            log(SERVICE, "cuML estimator detected; fitting sklearn surrogate for ONNX export compatibility.")
-            surrogate_params = {
-                "random_state": RANDOM_STATE,
-                "n_estimators": search.best_params_.get("n_estimators", 100),
-                "max_depth": search.best_params_.get("max_depth", None),
-                "min_samples_split": search.best_params_.get("min_samples_split", 2),
-                "max_features": search.best_params_.get("max_features", "sqrt"),
-            }
-            if "class_weight" in search.best_params_:
-                surrogate_params["class_weight"] = search.best_params_["class_weight"]
-
-            onnx_export_estimator = SklearnRandomForestClassifier(**surrogate_params)
-            onnx_export_estimator.fit(x_train, y_train)
-
         onnx_result = convert_sklearn(
-            onnx_export_estimator,
+            tuned_model,
             initial_types=[("input", FloatTensorType([None, x_sample.shape[1]]))],
         )
         onnx_model = onnx_result[0] if isinstance(onnx_result, tuple) else onnx_result
@@ -484,7 +334,7 @@ def run() -> None:
                 "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                 "model_path": str(model_onnx_path),
                 "source_model_type": f"{tuned_model.__class__.__module__}.{tuned_model.__class__.__name__}",
-                "onnx_export_model_type": f"{onnx_export_estimator.__class__.__module__}.{onnx_export_estimator.__class__.__name__}",
+                "onnx_export_model_type": f"{tuned_model.__class__.__module__}.{tuned_model.__class__.__name__}",
             },
         )
         log(SERVICE, "Wrote model.onnx")

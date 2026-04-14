@@ -24,9 +24,6 @@ training-onnx = [
   "onnxruntime==1.21.0",
   "skl2onnx==1.20.0",
 ]
-training-gpu = [
-  "cuml-cu12==26.2.0",
-]
 streamlit = [
   "joblib==1.4.2",
   "matplotlib==3.8.4",

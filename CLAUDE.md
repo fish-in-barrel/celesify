@@ -33,7 +33,7 @@ Dataset: 100,000 objects, 17 features, 3 target classes. Source: fedesoriano (20
 │   │   ├── requirements.txt
 │   │   └── preprocess.py        # Ingests CSV, cleans, splits, writes Parquet
 │   ├── training/
-│   │   ├── Dockerfile           # Built on NVIDIA CUDA base; falls back to CPU
+│   │   ├── Dockerfile           # CPU-first sklearn runtime image
 │   │   ├── requirements.txt
 │   │   └── train.py             # Baseline RF, hyperparameter search, export
 │   └── streamlit/
@@ -56,7 +56,7 @@ networking or API layer between preprocessing and training.
 | Service          | Base image              | Reads from        | Writes to              |
 |------------------|-------------------------|-------------------|------------------------|
 | `preprocessing`  | python:3.11-slim        | `data/raw/*.csv`  | `outputs/processed/`   |
-| `training`       | nvidia/cuda (+ CPU fallback) | `outputs/processed/` | `outputs/models/`  |
+| `training`       | python:3.11-slim (CPU sklearn) | `outputs/processed/` | `outputs/models/`  |
 | `streamlit`      | python:3.11-slim        | `outputs/models/` | —                      |
 
 To run the full stack:
@@ -65,8 +65,54 @@ To run the full stack:
 docker compose up
 ```
 
-No other setup required. GPU acceleration is opt-in via the NVIDIA Container Toolkit;
-hosts without it run on CPU automatically.
+No other setup required.
+
+### Runtime direction update (April 2026)
+
+The project is now intentionally CPU-first for training (`scikit-learn` Random Forest with
+`n_jobs=-1`) and no longer depends on CUDA/cuML for the default workflow.
+
+Rationale for moving away from CUDA/GPU in this project:
+- Dataset size and model family (`~100k` rows, tabular RF) did not produce enough wall-clock
+  gains to offset engineering overhead.
+- CUDA image pulls, environment bootstrapping, and container rebuild times increased the
+  iteration loop for development and debugging.
+- GPU-specific configuration (toolkit/runtime/version compatibility) reduced portability across
+  machines and contributor setups.
+- CPU-only sklearn runs are reproducible, simpler to maintain, and fast enough for the current
+  tuning/search scope.
+
+This tradeoff prioritizes total developer productivity and reliability over peak hardware
+throughput.
+
+### Developer environment direction update (April 2026)
+
+The development container is standardized on a lean Python image rather than a CUDA/NVIDIA base
+image. The goal is faster rebuilds, lower image pull size, and fewer environment-specific
+failures during day-to-day development.
+
+Dev-container SSH setup direction:
+- Use SSH agent forwarding into the container instead of copying private keys into the image.
+- Keep key material on the host and expose only the agent socket in the dev-container runtime.
+- Validate access with a non-destructive check (for example `ssh -T git@github.com`) after
+  container startup.
+
+Shell experience direction:
+- Install and enable Starship in the dev-container for a consistent prompt across local and
+  container sessions.
+- Keep Starship configuration lightweight and commit-safe (no machine-specific secrets).
+
+Python project management direction:
+- Adopt Rye as the project manager for dependency resolution, lockfile control, virtual
+  environment management, and task execution.
+- Prefer checked-in lockfiles and deterministic sync/install steps for reproducibility.
+- Use Rye-managed scripts/tasks so local runs and CI runs execute the same commands.
+
+Rationale for adopting Rye:
+- Improves reproducibility with consistent, locked dependency graphs.
+- Reduces bootstrap drift between contributors and CI/deployment environments.
+- Supports deployable workflows by making build/install behavior deterministic and repeatable.
+- Simplifies Python toolchain management (interpreter + environment + dependencies) in one place.
 
 ---
 
@@ -78,6 +124,10 @@ hosts without it run on CPU automatically.
 - [x] Create skeleton `Dockerfile` + `requirements.txt` for each service
 - [x] Verify `docker compose up` completes without errors before writing model code
 - [x] Pin all dependency versions
+- [x] Switch dev-container from NVIDIA/CUDA image to a lean Python development image
+- [x] Configure SSH agent forwarding in dev-container workflow (no private key copy into container)
+- [x] Add Starship prompt setup in dev-container bootstrap
+- [x] Standardize Python dependency/tooling workflow on Rye for reproducible local/CI execution
 
 ### Phase 2 — Data ingestion & preprocessing (Days 2–3)
 Work happens in `services/preprocessing/preprocess.py`.
@@ -114,19 +164,19 @@ Work happens in `services/training/train.py`.
 - The imbalance signal remains greater than 2.0, so `class_weight='balanced'` stays enabled in the tuning search space.
 - Feature set after preprocessing drop step is `alpha`, `delta`, `u`, `g`, `r`, `i`, `z`, `redshift`, plus encoded `class`.
 - Random seed continuity remains `random_state=42` in all Phase 3 training/splitting/CV logic.
-- cuML is now installed in the rebuilt training image and imports successfully from `cuml.ensemble`.
+- Training is standardized on sklearn CPU execution with parallelism (`n_jobs=-1`) for both
+  `RandomForestClassifier` and `RandomizedSearchCV`.
 
 **Phase 3 implementation notes learned during validation:**
 - Quick smoke tests are supported through environment overrides in `train.py`: `TRAINING_N_ITER`, `TRAINING_CV_SPLITS`, `TRAINING_N_JOBS`, and `TRAINING_MAX_TRAIN_ROWS`.
 - Keep the defaults for full runs, but use the quick-test overrides for local validation and ONNX debugging.
-- The training container now prefers cuML when available and falls back to sklearn only if the import fails.
-- The tuned-model workflow now uses a two-stage pattern: broad search on cuML (GPU) when available, then CPU sklearn confirmation/refit on shortlisted candidates before final artifact export.
-- If GPU/cuML broad search fails at runtime, training automatically falls back to sklearn broad search to keep the pipeline running.
-- Candidate shortlist size for CPU confirmation is configurable with `TRAINING_TOP_K` (default 3).
-- Docker GPU access is configured through `gpus: all` plus `NVIDIA_VISIBLE_DEVICES=all` and `NVIDIA_DRIVER_CAPABILITIES=compute,utility` in `docker-compose.yml`.
+- Training no longer branches across GPU and CPU execution paths; a single sklearn CPU path is
+  used for baseline, search, and final export.
+- Docker GPU runtime flags are intentionally removed from the default compose workflow to keep
+  setup lean and portable.
 - ONNX export initially failed with the older converter stack because `skl2onnx` could not serialize the current RandomForest layout correctly.
 - The validated training stack for ONNX export is `onnx==1.21.0`, `onnxruntime==1.21.0`, and `skl2onnx==1.20.0`.
-- The training image now uses `nvidia/cuda:12.4.1-devel-ubuntu22.04` by default, and `services/training/requirements.txt` pins `cuml-cu12==26.2.0` for GPU RF support.
+- The training image uses a standard Python base for CPU-only sklearn execution.
 - `onnxruntime` is now included in `services/training/requirements.txt` so the exported model can be smoke-tested in the same environment.
 - The exported ONNX file was validated with both the ONNX checker and a runtime session load.
 
@@ -136,7 +186,7 @@ Work happens in `services/training/train.py`.
 - Ensure confusion matrix and per-class metrics use the encoded class IDs consistently with the preprocessing mapping.
 - Record the actual `n_iter` used for `RandomizedSearchCV` in code/comments and saved outputs for paper reproducibility.
 - If you need a fast validation run, set `TRAINING_N_ITER=1`, `TRAINING_CV_SPLITS=2`, `TRAINING_N_JOBS=1`, and `TRAINING_MAX_TRAIN_ROWS=3000`.
-- For parity-focused runs, keep final reported metrics/artifacts tied to the CPU sklearn refit stage, even when broad search ran on GPU.
+- Keep final reported metrics/artifacts tied to the CPU sklearn training/export stage for reproducibility.
 
 **Step 1 — Baseline model**
 - [x] Load Parquet from shared volume
@@ -168,9 +218,8 @@ Do not touch hyperparameters until the baseline is fully evaluated and saved.
 - [x] Save final model as `outputs/models/model.joblib`
 - [x] Export ONNX artifact as `outputs/models/model.onnx`
 
-**GPU note:** `train.py` should attempt `from cuml.ensemble import RandomForestClassifier`
-at runtime and fall back to `from sklearn.ensemble import RandomForestClassifier` silently
-if cuML is unavailable. The API is nearly identical; the fallback requires no other code changes.
+**CPU note:** `train.py` should use `sklearn.ensemble.RandomForestClassifier` directly with
+`n_jobs=-1` and `random_state=42` for reproducible, parallel CPU execution.
 
 **Validation outcome:**
 - ONNX artifact `outputs/models/model.onnx` is valid, checker-passes, and loads in `onnxruntime`.
@@ -211,7 +260,6 @@ Three views:
 | pandas              | preprocessing  | CSV ingestion, cleaning, splitting           |
 | numpy               | preprocessing  | Numerical operations                         |
 | scikit-learn        | training       | RF model, GridSearchCV, metrics              |
-| cuML (optional)     | training       | Drop-in GPU-accelerated RF                   |
 | imbalanced-learn    | training       | SMOTE if class imbalance warrants it         |
 | SHAP (optional)     | training       | Model-agnostic feature importance            |
 | joblib              | training       | Model serialization                          |
@@ -251,4 +299,3 @@ Always report baseline and tuned metrics together in the same table.
 - Kavlakoglu, E. (n.d.). What is Random Forest? IBM.
 - NASA Goddard Space Flight Center (2025). Nancy Grace Roman Space Telescope.
 - Pedregosa et al. (2011). Scikit-learn: Machine Learning in Python. JMLR 12.
-- NVIDIA Corporation (2024). cuML v24.10.

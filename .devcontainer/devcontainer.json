@@ -1,7 +1,6 @@
 {
   "name": "celesify",
-  "image": "nvidia/cuda:12.4.1-devel-ubuntu22.04",
-  "runArgs": ["--gpus=all"],
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
   "features": {
     "ghcr.io/devcontainers/features/python:1": {
       "version": "3.11"
@@ -27,13 +26,12 @@
     }
   },
   "containerEnv": {
-    "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-    "NVIDIA_VISIBLE_DEVICES": "all",
-    "NVIDIA_DRIVER_CAPABILITIES": "compute,utility",
-    "PIP_EXTRA_INDEX_URL": "https://pypi.nvidia.com"
+    "PIP_DISABLE_PIP_VERSION_CHECK": "1"
   },
   "mounts": [
-    "source=celesify-pip-cache,target=/root/.cache/pip,type=volume"
+    "source=celesify-data-raw,target=${containerWorkspaceFolder}/data/raw,type=volume",
+    "source=celesify-outputs-processed,target=${containerWorkspaceFolder}/outputs/processed,type=volume",
+    "source=celesify-outputs-models,target=${containerWorkspaceFolder}/outputs/models,type=volume"
   ],
   "forwardPorts": [8501],
   "portsAttributes": {
@@ -43,5 +41,5 @@
     }
   },
   "postCreateCommand": "bash .devcontainer/postCreate.sh",
-  "remoteUser": "root"
+  "remoteUser": "vscode"
 }

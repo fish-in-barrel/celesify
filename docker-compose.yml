@@ -16,14 +16,7 @@ services:
     build:
       context: .
       dockerfile: services/training/Dockerfile
-      args:
-        BASE_IMAGE: ${TRAINING_BASE_IMAGE:-nvidia/cuda:12.4.1-devel-ubuntu22.04}
-        INSTALL_GPU_DEPS: ${TRAINING_INSTALL_GPU_DEPS:-0}
     image: celesify-training:latest
-    gpus: all
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     volumes:
       - shared_outputs:/workspace/outputs
     working_dir: /workspace
