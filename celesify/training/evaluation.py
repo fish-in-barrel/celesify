@@ -10,6 +10,7 @@ This module handles:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, cast
 
 import numpy as np
@@ -179,26 +180,28 @@ def format_baseline_metrics(
     Returns:
         Dictionary ready for JSON export.
     """
-    from datetime import datetime, timezone
+    split_files = {
+        "train": clean_train_name,
+        "test": clean_test_name,
+    }
+
+    common = _build_common_metadata(
+        class_label_order=class_label_order,
+        class_mapping=class_mapping,
+        feature_columns=feature_columns,
+        dataset_variant=clean_variant,
+        split_files=split_files,
+        preprocess_report=preprocess_report,
+        random_state=random_state,
+    )
 
     return {
-        "status": "completed",
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-        "random_state": random_state,
-        "dataset_variant": clean_variant,
-        "split_files": {
-            "train": clean_train_name,
-            "test": clean_test_name,
-        },
-        "class_label_order": class_label_order,
-        "class_mapping": class_mapping,
-        "feature_columns": feature_columns,
+        **common,
         "dataset_shapes": {
             "train": list(clean_train_shape),
             "test": list(clean_test_shape),
         },
         "n_features": len(feature_columns),
-        "preprocessing_summary": _extract_preprocessing_summary(preprocess_report),
         **evaluation,
     }
 
@@ -243,26 +246,29 @@ def format_tuned_metrics(
     Returns:
         Dictionary ready for JSON export.
     """
-    from datetime import datetime, timezone
+    common = _build_common_metadata(
+        class_label_order=class_label_order,
+        class_mapping=class_mapping,
+        feature_columns=feature_columns,
+        dataset_variant=dataset_variant,
+        split_files=split_files,
+        preprocess_report=preprocess_report,
+        random_state=random_state,
+    )
+
+    search = _build_search_metadata(
+        n_iter_used=n_iter_used,
+        cv_splits=cv_splits,
+        n_jobs=n_jobs,
+        best_params=best_params,
+        best_cv_score=best_cv_score,
+        top_5_results=top_5_results,
+    )
 
     return {
-        "status": "completed",
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-        "random_state": random_state,
-        "dataset_variant": dataset_variant,
-        "split_files": split_files,
-        "class_label_order": class_label_order,
-        "class_mapping": class_mapping,
-        "feature_columns": feature_columns,
+        **common,
         "dataset_shapes": dataset_shapes,
-        "preprocessing_summary": _extract_preprocessing_summary(preprocess_report),
-        "n_iter_used": n_iter_used,
-        "cv_splits": cv_splits,
-        "n_jobs": n_jobs,
-        "search_backend": "sklearn_cpu",
-        "best_params": best_params,
-        "best_cv_score": best_cv_score,
-        "top_5_results": top_5_results,
+        **search,
         **evaluation,
     }
 
@@ -285,8 +291,6 @@ def format_best_params(
     Returns:
         Dictionary ready for JSON export.
     """
-    from datetime import datetime, timezone
-
     return {
         "status": "completed",
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -313,8 +317,6 @@ def format_top_trials(
     Returns:
         Dictionary ready for JSON export.
     """
-    from datetime import datetime, timezone
-
     return {
         "status": "completed",
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -336,8 +338,6 @@ def format_feature_importance(
     Returns:
         Dictionary ready for JSON export.
     """
-    from datetime import datetime, timezone
-
     return {
         "status": "completed",
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -355,3 +355,47 @@ def _extract_preprocessing_summary(report: dict[str, Any]) -> dict[str, Any]:
         "feature_count_before": (report.get("dataset_comparison") or {}).get("feature_count_before"),
         "feature_count_after": (report.get("dataset_comparison") or {}).get("feature_count_after"),
     }
+
+
+def _build_common_metadata(
+    class_label_order: list[int],
+    class_mapping: dict[str, int],
+    feature_columns: list[str],
+    dataset_variant: str,
+    split_files: dict[str, str],
+    preprocess_report: dict[str, Any],
+    random_state: int,
+) -> dict[str, Any]:
+    """Build common metadata fields for all metric exports."""
+    return {
+        "status": "completed",
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "random_state": random_state,
+        "dataset_variant": dataset_variant,
+        "split_files": split_files,
+        "class_label_order": class_label_order,
+        "class_mapping": class_mapping,
+        "feature_columns": feature_columns,
+        "preprocessing_summary": _extract_preprocessing_summary(preprocess_report),
+    }
+
+
+def _build_search_metadata(
+    n_iter_used: int,
+    cv_splits: int,
+    n_jobs: int,
+    best_params: dict[str, Any],
+    best_cv_score: float,
+    top_5_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build search-specific metadata (hyperparameter tuning details)."""
+    return {
+        "n_iter_used": n_iter_used,
+        "cv_splits": cv_splits,
+        "n_jobs": n_jobs,
+        "search_backend": "sklearn_cpu",
+        "best_params": best_params,
+        "best_cv_score": best_cv_score,
+        "top_5_results": top_5_results,
+    }
+
