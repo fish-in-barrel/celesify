@@ -109,15 +109,35 @@ def _predict_dataframe(model: Any, data: pd.DataFrame, inverse_map: dict[int, st
     return output
 
 
-def render_upload_and_infer(model: Any, tuned_metrics: dict[str, Any]) -> None:
+def render_upload_and_infer(
+    model: Any,
+    baseline_metrics: dict[str, Any],
+    clean_tuned_metrics: dict[str, Any],
+    tuned_metrics: dict[str, Any],
+) -> None:
     st.subheader("Upload and Infer")
     st.caption(
         "Predict stellar class from original dataset parameters (alpha, delta, magnitudes, redshift). "
         "Engineered features are calculated automatically."
     )
 
-    model_features = _infer_model_features(tuned_metrics)
-    class_mapping = tuned_metrics.get("class_mapping")
+    # Model variant selector (dropdown)
+    model_variants = {
+        "Baseline (default)": baseline_metrics,
+        "Clean Tuned": clean_tuned_metrics,
+        "Tuned (engineered)": tuned_metrics,
+    }
+    
+    selected_model = st.selectbox(
+        "Model variant for inference",
+        options=list(model_variants.keys()),
+        index=2,  # Default to "Tuned (engineered)"
+        key="infer_model_variant",
+    )
+    
+    selected_metrics = model_variants[selected_model]
+    model_features = _infer_model_features(selected_metrics)
+    class_mapping = selected_metrics.get("class_mapping")
     inverse_map = inverse_class_mapping(class_mapping if isinstance(class_mapping, dict) else None)
 
     mode = st.radio("Input mode", options=["Manual", "CSV Upload"], horizontal=True)

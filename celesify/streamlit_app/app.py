@@ -7,7 +7,6 @@ from celesify.streamlit_app.common import (
     MODELS_DIR,
     PROCESSED_DIR,
     SERVICE,
-    get_available_model_variants,
     inverse_class_mapping,
     load_json,
     load_model,
@@ -41,35 +40,12 @@ def run() -> None:
     except FileNotFoundError as exc:
         st.warning(str(exc))
 
-    # Model variant selection
-    available_variants = get_available_model_variants()
-    if not available_variants:
-        st.error("No trained model variants found. Please run training first.")
-        return
-
-    st.sidebar.markdown("### Model Selection")
-    selected_variant = st.sidebar.radio(
-        "Choose model variant",
-        options=list(available_variants.keys()),
-        index=list(available_variants.keys()).index("Tuned (engineered)") if "Tuned (engineered)" in available_variants else 0,
-        key="model_variant_selector",
-    )
-    
-    model_path, metrics_path = available_variants[selected_variant]
-    
-    # Load selected metrics
-    selected_metrics: dict = {}
-    try:
-        selected_metrics = load_json(metrics_path)
-    except FileNotFoundError as exc:
-        st.sidebar.warning(f"Could not load metrics for {selected_variant}: {exc}")
-
-    class_mapping = selected_metrics.get("class_mapping") if isinstance(selected_metrics, dict) else None
+    class_mapping = tuned_metrics.get("class_mapping") if isinstance(tuned_metrics, dict) else None
     inverse_map = inverse_class_mapping(class_mapping if isinstance(class_mapping, dict) else None)
 
     model = None
     try:
-        model = load_model(model_path)
+        model = load_model(str(MODELS_DIR / "model.joblib"))
     except FileNotFoundError as exc:
         st.warning(str(exc))
     except Exception as exc:  # pragma: no cover - runtime safety path
@@ -88,10 +64,10 @@ def run() -> None:
     with tab_infer:
         if model is None:
             st.info("Model artifact not loaded. Upload and inference are unavailable.")
-        elif not selected_metrics:
+        elif not tuned_metrics:
             st.info("Model metrics are missing, so feature schema could not be derived.")
         else:
-            render_upload_and_infer(model, selected_metrics)
+            render_upload_and_infer(model, baseline_metrics, clean_tuned_metrics, tuned_metrics)
 
     with st.expander("Utilities", expanded=False):
         if st.button("Refresh cache"):

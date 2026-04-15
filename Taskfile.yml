@@ -2,6 +2,7 @@ version: "3"
 
 vars:
   RYE_BIN: rye
+  FEATURES_FILE: .task-features
 
 tasks:
   default:
@@ -17,26 +18,51 @@ tasks:
       - echo "Rye is required. Install from https://rye.astral.sh/ and retry."
       - exit 1
 
+  _get-features:
+    desc: Internal task to get cumulative features for sync operations.
+    internal: true
+    silent: true
+    cmds:
+      - |
+        if [ -f {{.FEATURES_FILE}} ]; then
+          cat {{.FEATURES_FILE}}
+        else
+          echo ""
+        fi
+
+  _sync-with-features:
+    desc: Internal task to sync with features while preserving existing ones.
+    internal: true
+    requires:
+      vars:
+        - NEW_FEATURES
+    cmds:
+      - |
+        EXISTING=$([ -f {{.FEATURES_FILE}} ] && cat {{.FEATURES_FILE}} || echo "")
+        ALL_FEATURES=$(echo "$EXISTING {{.NEW_FEATURES}}" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+        {{.RYE_BIN}} sync $(echo $ALL_FEATURES | sed 's/^/--features /' | sed 's/ / --features /g')
+        echo "$ALL_FEATURES" | xargs > {{.FEATURES_FILE}}
+
   sync-preprocess:
-    desc: Sync the Rye environment for preprocessing work.
+    desc: Sync the Rye environment for preprocessing work (additive).
     deps:
       - rye
     cmds:
-      - "{{.RYE_BIN}} sync --features preprocessing"
+      - EXISTING=$([ -f {{.FEATURES_FILE}} ] && cat {{.FEATURES_FILE}} || echo "") && {{.RYE_BIN}} sync --features preprocessing $EXISTING && echo "preprocessing $EXISTING" | tr ' ' '\n' | sort -u | tr '\n' ' ' > {{.FEATURES_FILE}} && echo "" >> {{.FEATURES_FILE}}
 
   sync-train:
-    desc: Sync the Rye environment for training work (CPU + ONNX path).
+    desc: Sync the Rye environment for training work (additive).
     deps:
       - rye
     cmds:
-      - "{{.RYE_BIN}} sync --features training-core --features training-onnx"
+      - EXISTING=$([ -f {{.FEATURES_FILE}} ] && cat {{.FEATURES_FILE}} || echo "") && {{.RYE_BIN}} sync --features training-core --features training-onnx $EXISTING && echo "training-core training-onnx $EXISTING" | tr ' ' '\n' | sort -u | tr '\n' ' ' > {{.FEATURES_FILE}} && echo "" >> {{.FEATURES_FILE}}
 
   sync-streamlit:
-    desc: Sync the Rye environment for streamlit work.
+    desc: Sync the Rye environment for streamlit work (additive).
     deps:
       - rye
     cmds:
-      - "{{.RYE_BIN}} sync --features streamlit"
+      - EXISTING=$([ -f {{.FEATURES_FILE}} ] && cat {{.FEATURES_FILE}} || echo "") && {{.RYE_BIN}} sync --features streamlit $EXISTING && echo "streamlit $EXISTING" | tr ' ' '\n' | sort -u | tr '\n' ' ' > {{.FEATURES_FILE}} && echo "" >> {{.FEATURES_FILE}}
 
   sync-all:
     desc: Sync the Rye environment with all service dependency groups.
@@ -44,6 +70,13 @@ tasks:
       - rye
     cmds:
       - "{{.RYE_BIN}} sync --features preprocessing --features training-core --features training-onnx --features streamlit"
+      - "echo 'preprocessing training-core training-onnx streamlit' > {{.FEATURES_FILE}}"
+
+  sync-reset:
+    desc: Reset feature state and clear lockfile (use if corrupted).
+    cmds:
+      - "rm -f {{.FEATURES_FILE}} requirements.lock"
+      - "echo 'Feature state cleared. Run sync-all or a specific sync task to rebuild.'"
 
   run-preprocess:
     desc: Run preprocessing through Rye.
@@ -70,6 +103,22 @@ tasks:
     desc: Kill the Streamlit app process.
     cmds:
       - pkill -f "streamlit run celesify/streamlit_app/main.py" || true
+
+  deploy:
+    desc: Build training artifacts and upload to GitHub release for Streamlit Community Cloud.
+    deps:
+      - rye
+    cmds:
+      - echo "Building training artifacts..."
+      - "{{.RYE_BIN}} run train"
+      - echo "Creating artifacts archive..."
+      - rm -f celesify-artifacts.zip
+      - zip -r celesify-artifacts.zip outputs/
+      - echo "Uploading to GitHub release..."
+      - gh release delete latest --yes || true
+      - gh release create latest celesify-artifacts.zip --title "Training Artifacts ($(date +%Y-%m-%d))" --notes "Auto-generated training artifacts"
+      - echo "✓ Deployment complete! Artifacts uploaded to GitHub release."
+      - echo "  Next: Reboot your Streamlit app in the dashboard to pull fresh artifacts."
 
   docker-build:
     desc: Build the Docker images defined in docker-compose.yml.

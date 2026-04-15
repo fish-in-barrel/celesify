@@ -3,5 +3,20 @@ gatherUsageStats = false
 
 [server]
 headless = true
-runOnSave = true
-fileWatcherType = "poll"
+runOnSave = false
+port = 8501
+enableXsrfProtection = true
+
+[logger]
+level = "info"
+
+[theme]
+primaryColor = "#0b8bca"
+backgroundColor = "#f8fbff"
+secondaryBackgroundColor = "#d7deea"
+textColor = "#0b1424"
+font = "sans serif"
+
+[client]
+showErrorDetails = false
+toolbarMode = "minimal"
