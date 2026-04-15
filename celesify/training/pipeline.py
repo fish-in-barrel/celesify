@@ -1,229 +1,378 @@
+"""
+Training pipeline orchestration.
+
+Coordinates all phases of model training:
+1. Data loading and preparation
+2. Baseline model training and evaluation
+3. Hyperparameter search and tuned model training
+4. Artifact export (metrics, model files, feature importance)
+
+This module uses specialized submodules for each concern:
+- data_handling: Loading and preparing datasets
+- model_training: Training and hyperparameter search
+- evaluation: Computing metrics and importance scores
+- export: Writing artifacts to disk
+- config: Managing training configuration
+"""
+
 from __future__ import annotations
 
-import json
-import os
-import traceback
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
-import joblib
-import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier as SklearnRandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
-from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold
-from skl2onnx import convert_sklearn
-from skl2onnx.common.data_types import FloatTensorType
 
-from celesify.core.constants import CLASS_ENCODING, CLASS_LABEL_ORDER, RANDOM_STATE
-from celesify.core.json_utils import as_jsonable, write_json
+from celesify.core.constants import CLASS_LABEL_ORDER, RANDOM_STATE
 from celesify.core.logging import log
 from celesify.core.paths import resolve_training_paths
+from celesify.training import data_handling, evaluation, export, model_training
+from celesify.training.config import TrainingConfig
 
 SERVICE = "training"
 
 
-DEFAULT_CLASS_MAP = CLASS_ENCODING
-
-
-def load_split_variant(
-    processed_dir: Path,
-    candidates: list[tuple[str, str, str]],
-) -> tuple[pd.DataFrame, pd.DataFrame, str, str, str]:
-    for train_name, test_name, variant_name in candidates:
-        train_file = processed_dir / train_name
-        test_file = processed_dir / test_name
-        if train_file.exists() and test_file.exists():
-            return (
-                pd.read_parquet(train_file),
-                pd.read_parquet(test_file),
-                variant_name,
-                train_file.name,
-                test_file.name,
-            )
-    candidate_list = ", ".join(f"{train}/{test}" for train, test, _ in candidates)
-    raise FileNotFoundError(f"No matching parquet split found. Checked: {candidate_list}")
-
-
-def get_imbalance_recommendation(preprocess_report: dict) -> bool:
-    recommendation = preprocess_report.get("imbalance_recommendation")
-    if isinstance(recommendation, str) and "balanced" in recommendation.lower():
-        return True
-
-    nested_assessment = preprocess_report.get("imbalance_assessment")
-    if isinstance(nested_assessment, dict):
-        nested_recommendation = nested_assessment.get("recommendation")
-        if isinstance(nested_recommendation, str) and "balanced" in nested_recommendation.lower():
-            return True
-
-    ratio = preprocess_report.get("majority_minority_ratio")
-    if ratio is None:
-        ratio = preprocess_report.get("imbalance_ratio")
-    if ratio is None and isinstance(preprocess_report.get("class_balance"), dict):
-        ratio = preprocess_report["class_balance"].get("majority_minority_ratio")
-    if ratio is None and isinstance(nested_assessment, dict):
-        ratio = nested_assessment.get("majority_to_minority_ratio")
-
-    if ratio is not None:
-        try:
-            return float(ratio) > 2.0
-        except (TypeError, ValueError):
-            return False
-    return False
-
-
-def get_class_mapping(preprocess_report: dict) -> dict[str, int]:
-    class_mapping = preprocess_report.get("class_mapping")
-    if class_mapping is None:
-        class_mapping = preprocess_report.get("target_encoding")
-    if isinstance(class_mapping, dict):
-        parsed = {}
-        for name, encoded in class_mapping.items():
-            try:
-                parsed[str(name)] = int(encoded)
-            except (TypeError, ValueError):
-                continue
-        if parsed:
-            return parsed
-    return DEFAULT_CLASS_MAP
-
-
-def evaluate_model(model: Any, x_test: pd.DataFrame, y_test: pd.Series) -> dict[str, Any]:
-    y_pred = model.predict(x_test)
-    matrix = confusion_matrix(y_test, y_pred, labels=CLASS_LABEL_ORDER)
-    report = classification_report(
-        y_test,
-        y_pred,
-        labels=CLASS_LABEL_ORDER,
-        output_dict=True,
-        zero_division=0,
+def _check_processed_data_exists(processed_dir: Path) -> bool:
+    """Check if any valid processed data split exists."""
+    candidates = [
+        ("train_clean.parquet", "test_clean.parquet"),
+        ("train.parquet", "test.parquet"),
+    ]
+    return any(
+        (processed_dir / train).exists() and (processed_dir / test).exists()
+        for train, test in candidates
     )
-    per_class_metrics = {}
-    for label in CLASS_LABEL_ORDER:
-        label_report = report.get(str(label), {}) if isinstance(report, dict) else {}
-        if not isinstance(label_report, dict):
-            continue
-        per_class_metrics[str(label)] = {
-            "precision": float(label_report.get("precision", 0.0)),
-            "recall": float(label_report.get("recall", 0.0)),
-            "f1_score": float(label_report.get("f1-score", 0.0)),
-            "support": int(label_report.get("support", 0)),
-        }
-
-    return {
-        "accuracy": float(accuracy_score(y_test, y_pred)),
-        "f1_macro": float(f1_score(y_test, y_pred, average="macro", zero_division=0)),
-        "confusion_matrix": matrix.tolist(),
-        "per_class_metrics": per_class_metrics,
-    }
 
 
-def get_int_env(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        log(SERVICE, f"Invalid {name}={raw!r}; using default {default}.")
-        return default
+def _train_and_evaluate_baseline(
+    x_clean_train: pd.DataFrame,
+    y_clean_train: pd.Series,
+    x_clean_test: pd.DataFrame,
+    y_clean_test: pd.Series,
+    clean_feature_columns: list[str],
+    dataset_shapes: dict[str, list[int]],
+    dataset_metadata: dict[str, str],
+    preprocess_report: dict,
+    config: TrainingConfig,
+    class_mapping: dict[str, int],
+) -> None:
+    """
+    Phase 1: Train baseline model and save metrics.
+
+    The baseline uses default Random Forest hyperparameters and serves as
+    a control to measure improvement from tuning.
+    """
+    log(SERVICE, "=== PHASE 1: Baseline Model ===")
+
+    baseline_model = model_training.train_baseline_model(
+        x_clean_train, y_clean_train, config.n_jobs
+    )
+
+    baseline_eval = evaluation.evaluate_model(baseline_model, x_clean_test, y_clean_test)
+
+    baseline_metrics = evaluation.format_baseline_metrics(
+        evaluation=baseline_eval,
+        class_label_order=CLASS_LABEL_ORDER,
+        class_mapping=class_mapping,
+        feature_columns=clean_feature_columns,
+        clean_train_shape=x_clean_train.shape,
+        clean_test_shape=x_clean_test.shape,
+        clean_variant=dataset_metadata["variant_clean"],
+        clean_train_name=dataset_metadata["clean_train_file"],
+        clean_test_name=dataset_metadata["clean_test_file"],
+        preprocess_report=preprocess_report,
+        random_state=config.random_state,
+    )
+
+    export.save_metrics_json(
+        output_dir=Path(resolve_training_paths()[1]),
+        filename="baseline_metrics.json",
+        metrics=baseline_metrics,
+    )
 
 
-def run_randomized_search(
+def _train_and_search_tuned(
     x_train: pd.DataFrame,
     y_train: pd.Series,
-    n_iter_used: int,
-    cv_splits: int,
-    n_jobs: int,
-    class_weight_space: list[Any],
-) -> tuple[SklearnRandomForestClassifier, dict[str, Any], list[dict[str, Any]], float]:
-    param_distributions = {
-        "n_estimators": [100, 200, 300, 500],
-        "max_depth": [None, 10, 20, 30],
-        "min_samples_split": [2, 5, 10],
-        "max_features": ["sqrt", "log2", 0.3],
-        "class_weight": class_weight_space,
-    }
+    x_test: pd.DataFrame,
+    y_test: pd.Series,
+    engineered_feature_columns: list[str],
+    dataset_metadata: dict[str, str],
+    preprocess_report: dict,
+    config: TrainingConfig,
+    class_mapping: dict[str, int],
+    class_weight_space: list,
+) -> None:
+    """
+    Phase 2: Hyperparameter search and tuned model training.
 
-    search = RandomizedSearchCV(
-        estimator=SklearnRandomForestClassifier(random_state=RANDOM_STATE, n_jobs=n_jobs),
-        param_distributions=param_distributions,
-        n_iter=n_iter_used,
-        scoring="f1_macro",
-        cv=StratifiedKFold(n_splits=cv_splits, shuffle=True, random_state=RANDOM_STATE),
-        n_jobs=n_jobs,
-        random_state=RANDOM_STATE,
-        refit=True,
-        verbose=1,
+    Runs RandomizedSearchCV to find best hyperparameters, then trains
+    final model on full training set with best params.
+    """
+    log(SERVICE, "=== PHASE 2: Hyperparameter Search (Tuned Model) ===")
+
+    tuned_model, best_params, top_5_results, best_cv_score = model_training.run_randomized_search(
+        x_train=x_train,
+        y_train=y_train,
+        n_iter=config.n_iter,
+        cv_splits=config.cv_splits,
+        n_jobs=config.n_jobs,
+        class_weight_options=class_weight_space,
     )
-    search.fit(x_train, y_train)
 
-    cv_results = cast(dict[str, Any], search.cv_results_)
-    ranks = np.asarray(cv_results.get("rank_test_score", []), dtype=float)
-    mean_scores = np.asarray(cv_results.get("mean_test_score", []), dtype=float)
-    std_scores = np.asarray(cv_results.get("std_test_score", []), dtype=float)
-    mean_fit_times = np.asarray(cv_results.get("mean_fit_time", []), dtype=float)
-    std_fit_times = np.asarray(cv_results.get("std_fit_time", []), dtype=float)
-    mean_score_times = np.asarray(cv_results.get("mean_score_time", []), dtype=float)
-    std_score_times = np.asarray(cv_results.get("std_score_time", []), dtype=float)
-    params_list = cast(list[dict[str, Any]], cv_results.get("params", []))
+    tuned_eval = evaluation.evaluate_model(tuned_model, x_test, y_test)
 
-    top_5_results: list[dict[str, Any]] = []
-    if len(params_list) > 0 and len(mean_scores) == len(params_list):
-        order = np.argsort(-mean_scores)
-        for rank_position, idx in enumerate(order[:5], start=1):
-            params = params_list[int(idx)] if int(idx) < len(params_list) else {}
-            top_5_results.append(
-                {
-                    "rank": int(ranks[int(idx)]) if len(ranks) > int(idx) else rank_position,
-                    "mean_test_score": float(mean_scores[int(idx)]),
-                    "std_test_score": float(std_scores[int(idx)]) if len(std_scores) > int(idx) else 0.0,
-                    "mean_fit_time": float(mean_fit_times[int(idx)]) if len(mean_fit_times) > int(idx) else 0.0,
-                    "std_fit_time": float(std_fit_times[int(idx)]) if len(std_fit_times) > int(idx) else 0.0,
-                    "mean_score_time": float(mean_score_times[int(idx)]) if len(mean_score_times) > int(idx) else 0.0,
-                    "std_score_time": float(std_score_times[int(idx)]) if len(std_score_times) > int(idx) else 0.0,
-                    "params": as_jsonable(params),
-                }
-            )
+    # Format and save all metrics/params
+    tuned_metrics = evaluation.format_tuned_metrics(
+        evaluation=tuned_eval,
+        best_params=best_params,
+        best_cv_score=best_cv_score,
+        top_5_results=top_5_results,
+        class_label_order=CLASS_LABEL_ORDER,
+        class_mapping=class_mapping,
+        feature_columns=engineered_feature_columns,
+        dataset_shapes={
+            "train": list(x_train.shape),
+            "test": list(x_test.shape),
+        },
+        dataset_variant=dataset_metadata["variant_engineered"],
+        split_files={
+            "train": dataset_metadata["engineered_train_file"],
+            "test": dataset_metadata["engineered_test_file"],
+        },
+        preprocess_report=preprocess_report,
+        n_iter_used=config.n_iter,
+        cv_splits=config.cv_splits,
+        n_jobs=config.n_jobs,
+        random_state=config.random_state,
+    )
 
-    best_params = cast(dict[str, Any], search.best_params_)
-    best_score = float(search.best_score_)
+    best_params_export = evaluation.format_best_params(
+        best_params=best_params,
+        best_cv_score=best_cv_score,
+        top_5_results=top_5_results,
+        n_iter_used=config.n_iter,
+    )
 
-    tuned_model = SklearnRandomForestClassifier(random_state=RANDOM_STATE, n_jobs=n_jobs, **best_params)
-    tuned_model.fit(x_train, y_train)
+    top_trials_export = evaluation.format_top_trials(
+        top_results=top_5_results,
+        n_iter_used=config.n_iter,
+    )
 
-    return tuned_model, best_params, top_5_results, best_score
+    models_dir = Path(resolve_training_paths()[1])
+
+    export.save_metrics_json(models_dir, "tuned_metrics.json", tuned_metrics)
+    export.save_metrics_json(models_dir, "best_params.json", best_params_export)
+    export.save_metrics_json(models_dir, "top_trials.json", top_trials_export)
+
+    # Phase 3: Feature importance
+    log(SERVICE, "=== PHASE 3: Feature Importance ===")
+
+    feature_importance_items = evaluation.extract_feature_importance(
+        tuned_model, engineered_feature_columns
+    )
+
+    importance_export = evaluation.format_feature_importance(feature_importance_items)
+
+    export.save_metrics_json(
+        models_dir, "feature_importance.json", importance_export
+    )
+
+    # Phase 4: Export models
+    log(SERVICE, "=== PHASE 4: Model Export ===")
+
+    export.save_model_joblib(models_dir, "model.joblib", tuned_model)
+
+    # Try ONNX export (non-fatal if it fails)
+    onnx_success = export.export_onnx_model(
+        models_dir, tuned_model, x_train.iloc[:1]
+    )
+
+    if not onnx_success:
+        log(SERVICE, "Warning: ONNX export failed; joblib model is available.")
 
 
 def run() -> None:
+    """
+    Execute the complete training pipeline.
+
+    Pipeline stages:
+    1. Setup: resolve paths, check data availability
+    2. Load: read data, metadata, config
+    3. Baseline: train default RF, evaluate, export metrics
+    4. Search: hyperparameter tuning via RandomizedSearchCV
+    5. Tuned: train final model, export metrics and models
+    6. Importance: compute feature importance
+    7. Export: save ONNX and joblib artifacts
+    """
     processed_dir, models_dir = resolve_training_paths()
     models_dir.mkdir(parents=True, exist_ok=True)
-
-    clean_candidates = [
-        ("train_clean.parquet", "test_clean.parquet", "cleaned"),
-        ("train.parquet", "test.parquet", "engineered"),
-    ]
-    engineered_candidates = [
-        ("train.parquet", "test.parquet", "engineered"),
-        ("train_clean.parquet", "test_clean.parquet", "cleaned"),
-    ]
-    report_file = processed_dir / "preprocessing_report.json"
 
     log(SERVICE, f"Processed dir: {processed_dir}")
     log(SERVICE, f"Models dir: {models_dir}")
 
-    if not any((processed_dir / train).exists() and (processed_dir / test).exists() for train, test, _ in clean_candidates):
-        log(SERVICE, "Processed parquet files not found; writing scaffold placeholder artifacts.")
-        placeholder = {
-            "status": "skipped_no_processed_data",
-            "required_files": [str(processed_dir / "train_clean.parquet"), str(processed_dir / "test_clean.parquet"), str(processed_dir / "train.parquet"), str(processed_dir / "test.parquet")],
-            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-        }
-        write_json(models_dir / "baseline_metrics.json", placeholder)
-        write_json(models_dir / "tuned_metrics.json", placeholder)
-        write_json(models_dir / "best_params.json", {"status": "not_run"})
-        write_json(models_dir / "feature_importance.json", {"status": "not_run"})
+    # === Setup ===
+    if not _check_processed_data_exists(processed_dir):
+        log(SERVICE, "Processed parquet files not found; writing placeholder artifacts.")
+        required_files = [
+            str(processed_dir / "train_clean.parquet"),
+            str(processed_dir / "test_clean.parquet"),
+            str(processed_dir / "train.parquet"),
+            str(processed_dir / "test.parquet"),
+        ]
+        export.write_skip_placeholder(models_dir, required_files)
+        return
+
+    # === Load ===
+    log(SERVICE, f"Using random_state={RANDOM_STATE}, class_labels={CLASS_LABEL_ORDER}")
+
+    config = TrainingConfig()
+
+    preprocess_report = data_handling.load_preprocessing_report(
+        processed_dir / "preprocessing_report.json"
+    )
+
+    clean_train, clean_test, engineered_train, engineered_test, metadata = (
+        data_handling.load_datasets(processed_dir)
+    )
+    data_handling.log_dataset_info(clean_train, clean_test, engineered_train, engineered_test)
+
+    # Extract features and targets
+    (x_clean_train, y_clean_train, x_clean_test, y_clean_test, clean_feature_columns) = (
+        data_handling.extract_features_and_target(clean_train, clean_test)
+    )
+    (x_engineered_train, y_engineered_train, x_engineered_test, y_engineered_test, engineered_feature_columns) = (
+        data_handling.extract_features_and_target(engineered_train, engineered_test)
+    )
+
+    # Apply subsampling if configured (for quick validation runs)
+    if config.max_train_rows > 0:
+        engineered_train, engineered_test = data_handling.subsample_train_data(
+            engineered_train, engineered_test, config.max_train_rows
+        )
+        clean_train, clean_test = data_handling.subsample_train_data(
+            clean_train, clean_test, config.max_train_rows
+        )
+
+        # Re-extract after subsampling
+        (x_clean_train, y_clean_train, x_clean_test, y_clean_test, _) = (
+            data_handling.extract_features_and_target(clean_train, clean_test)
+        )
+        (x_engineered_train, y_engineered_train, x_engineered_test, y_engineered_test, _) = (
+            data_handling.extract_features_and_target(engineered_train, engineered_test)
+        )
+
+    # Determine class weighting strategy
+    class_mapping = data_handling.get_class_mapping(preprocess_report)
+    imbalance_flagged = data_handling.get_imbalance_recommendation(preprocess_report)
+    class_weight_space = [None, "balanced"] if imbalance_flagged else [None]
+
+    log(SERVICE, f"Class mapping: {class_mapping}")
+    log(SERVICE, f"Imbalance flagged: {imbalance_flagged}, class_weight_space: {class_weight_space}")
+
+    # === Baseline Training ===
+    _train_and_evaluate_baseline(
+        x_clean_train=x_clean_train,
+        y_clean_train=y_clean_train,
+        x_clean_test=x_clean_test,
+        y_clean_test=y_clean_test,
+        clean_feature_columns=clean_feature_columns,
+        dataset_shapes={
+            "train": list(x_clean_train.shape),
+            "test": list(x_clean_test.shape),
+        },
+        dataset_metadata=metadata,
+        preprocess_report=preprocess_report,
+        config=config,
+        class_mapping=class_mapping,
+    )
+
+    # === Hyperparameter Search & Tuned Training ===
+    _train_and_search_tuned(
+        x_train=x_engineered_train,
+        y_train=y_engineered_train,
+        x_test=x_engineered_test,
+        y_test=y_engineered_test,
+        engineered_feature_columns=engineered_feature_columns,
+        dataset_metadata=metadata,
+        preprocess_report=preprocess_report,
+        config=config,
+        class_mapping=class_mapping,
+        class_weight_space=class_weight_space,
+    )
+
+    log(SERVICE, "=== Training Pipeline Complete ===")
+"""
+Training pipeline orchestration.
+
+Coordinates all phases of model training:
+1. Data loading and preparation
+2. Baseline model training and evaluation
+3. Hyperparameter search and tuned model training
+4. Artifact export (metrics, model files, feature importance)
+
+This module uses specialized submodules for each concern:
+- data_handling: Loading and preparing datasets
+- model_training: Training and hyperparameter search
+- evaluation: Computing metrics and importance scores
+- export: Writing artifacts to disk
+- config: Managing training configuration
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, cast
+
+import pandas as pd
+
+from celesify.core.constants import CLASS_LABEL_ORDER, RANDOM_STATE
+from celesify.core.logging import log
+from celesify.core.paths import resolve_training_paths
+from celesify.training import data_handling, evaluation, export, model_training
+from celesify.training.config import TrainingConfig
+
+SERVICE = "training"
+
+
+def _check_processed_data_exists(processed_dir: Path) -> bool:
+    """Check if any valid processed data split exists."""
+    candidates = [
+        ("train_clean.parquet", "test_clean.parquet"),
+        ("train.parquet", "test.parquet"),
+    ]
+    return any(
+        (processed_dir / train).exists() and (processed_dir / test).exists()
+        for train, test in candidates
+    )
+
+
+def run() -> None:
+    """
+    Execute the complete training pipeline.
+
+    Phases:
+    1. Load data and configuration
+    2. Train and evaluate baseline model
+    3. Run hyperparameter search and train tuned model
+    4. Extract feature importance
+    5. Export all artifacts (metrics JSON, models, ONNX)
+    """
+    processed_dir, models_dir = resolve_training_paths()
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    log(SERVICE, f"Processed dir: {processed_dir}")
+    log(SERVICE, f"Models dir: {models_dir}")
+
+    # Check for input data
+    if not _check_processed_data_exists(processed_dir):
+        log(SERVICE, "Processed parquet files not found; writing placeholder artifacts.")
+        required_files = [
+            str(processed_dir / "train_clean.parquet"),
+            str(processed_dir / "test_clean.parquet"),
+            str(processed_dir / "train.parquet"),
+            str(processed_dir / "test.parquet"),
+        ]
+        export.write_skip_placeholder(models_dir, required_files)
         return
 
     log(SERVICE, f"Using random_state={RANDOM_STATE} and class labels={CLASS_LABEL_ORDER}")

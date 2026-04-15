@@ -239,6 +239,35 @@ def load_model(path_str: str) -> Any:
     return joblib.load(path)
 
 
+def get_available_model_variants() -> dict[str, tuple[str, str]]:
+    """
+    Discover available trained model variants and their metrics files.
+
+    Returns:
+        Dict mapping variant display names to (model_file, metrics_file) tuples.
+        Only includes variants where both model and metrics files exist.
+    """
+    variants: dict[str, tuple[str, str]] = {}
+
+    # Baseline model and metrics
+    baseline_model = MODELS_DIR / "model.joblib"
+    baseline_metrics = MODELS_DIR / "baseline_metrics.json"
+    if baseline_model.exists() and baseline_metrics.exists():
+        variants["Baseline (default)"] = (str(baseline_model), str(baseline_metrics))
+
+    # Clean tuned model and metrics
+    clean_tuned_metrics = MODELS_DIR / "clean_tuned_metrics.json"
+    if baseline_model.exists() and clean_tuned_metrics.exists():
+        variants["Clean Tuned"] = (str(baseline_model), str(clean_tuned_metrics))
+
+    # Tuned model and metrics
+    tuned_metrics = MODELS_DIR / "tuned_metrics.json"
+    if baseline_model.exists() and tuned_metrics.exists():
+        variants["Tuned (engineered)"] = (str(baseline_model), str(tuned_metrics))
+
+    return variants if variants else {"Tuned (engineered)": (str(baseline_model), str(tuned_metrics))}
+
+
 def validate_results_artifacts(
     baseline_metrics: dict[str, Any],
     tuned_metrics: dict[str, Any],

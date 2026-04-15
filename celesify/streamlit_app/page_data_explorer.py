@@ -128,11 +128,25 @@ def render_data_explorer(inverse_map: dict[int, str], preprocess_report: dict | 
     distribution_plot_specs.append(("Class Distribution", class_distribution_figure, "class_distribution"))
 
     feature_candidates = [col for col in sampled.columns if col != TARGET_COLUMN]
-    default_features = [col for col in ["alpha", "delta", "u", "g", "r", "i", "z", "redshift"] if col in feature_candidates]
+    
+    # Set defaults based on dataset variant
+    original_features = ["alpha", "delta", "u", "g", "r", "i", "z", "redshift"]
+    if dataset_variant == "cleaned":
+        # For cleaned data, show only original features
+        default_features = [col for col in original_features if col in feature_candidates][:4]
+    else:
+        # For engineered data, show original features + engineered ones
+        engineered_features = [
+            "color_u_g", "color_g_r", "color_r_i", "color_i_z", "color_u_r",
+            "color_g_i", "color_g_z", "color_r_z", "color_u_z",
+            "band_mean", "band_std", "band_min", "band_max", "band_range"
+        ]
+        default_features = [col for col in original_features + engineered_features if col in feature_candidates][:6]
+    
     selected_features = st.multiselect(
         "Histogram features",
         options=feature_candidates,
-        default=default_features[:4] if default_features else feature_candidates[:4],
+        default=default_features if default_features else feature_candidates[:4],
         key="explorer_hist_features",
     )
 
@@ -202,7 +216,15 @@ def render_data_explorer(inverse_map: dict[int, str], preprocess_report: dict | 
 
     st.markdown("#### Univariate Exploration")
     st.caption("These boxplots compare the spread of each feature across classes. They help reveal which variables separate classes well and where class distributions overlap.")
-    uni_defaults = [col for col in ["u", "g", "r", "i", "z", "redshift"] if col in numeric_features][:4]
+    
+    # Use context-aware defaults for univariate features
+    original_features_list = ["u", "g", "r", "i", "z", "redshift"]
+    if dataset_variant == "cleaned":
+        uni_defaults = [col for col in original_features_list if col in numeric_features][:4]
+    else:
+        engineered_features_list = ["color_u_g", "color_g_r", "color_r_i", "color_i_z", "band_mean", "band_std"]
+        uni_defaults = [col for col in original_features_list + engineered_features_list if col in numeric_features][:4]
+    
     univariate_features = st.multiselect(
         "Features for univariate analysis",
         options=numeric_features,
@@ -245,7 +267,13 @@ def render_data_explorer(inverse_map: dict[int, str], preprocess_report: dict | 
 
     st.markdown("#### Multivariate Analysis")
     st.caption("The pair matrix shows feature relationships two at a time. Off-diagonal scatter plots highlight class separation and interactions, while diagonal density curves show each feature’s distribution by class.")
-    pair_defaults = [col for col in ["u", "g", "r", "i"] if col in numeric_features]
+    
+    # Use context-aware defaults for pair plot features
+    if dataset_variant == "cleaned":
+        pair_defaults = [col for col in ["u", "g", "r", "i"] if col in numeric_features]
+    else:
+        pair_defaults = [col for col in ["u", "g", "color_u_g", "redshift"] if col in numeric_features]
+    
     pair_features = st.multiselect(
         "Features for pair plot",
         options=numeric_features,

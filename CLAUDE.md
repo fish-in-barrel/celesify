@@ -3,6 +3,12 @@
 This file describes the project structure, implementation plan, and working conventions for
 this codebase. Read it before making changes.
 
+## 📚 Documentation Quick Links
+
+- **[TRAINING_MODULE_ARCHITECTURE.md](TRAINING_MODULE_ARCHITECTURE.md)** — Technical deep dive into the refactored training modules (config, data_loading, model_training, evaluation, export, pipeline)
+- **[TRAINING_QUICK_REFERENCE.md](TRAINING_QUICK_REFERENCE.md)** — Quick start guide, code examples, and debugging tips for the training module
+- **[.instructions.md](.instructions.md)** — GitHub Copilot instructions and context for this project
+
 ---
 
 ## Project overview
@@ -158,7 +164,12 @@ how F1 is reported in the paper. Make the call here and document it.
 - [Hickox et al. (2017)](https://arxiv.org/abs/1709.04468) showed that optical-IR and mid-IR colors help identify obscured quasars that are difficult to recover from optical photometry alone. Takeaway: when host-galaxy contamination or dust is a concern, add optical-IR color contrasts rather than relying only on raw magnitudes.
 
 ### Phase 3 — Modelling & tuning (Days 3–6)
-Work happens in `services/training/train.py`.
+Work happens in `services/training/train.py` and the refactored modules in `celesify/training/`.
+
+**Training Module Documentation:**
+- 📘 [TRAINING_MODULE_ARCHITECTURE.md](TRAINING_MODULE_ARCHITECTURE.md) — Comprehensive technical guide
+- 🚀 [TRAINING_QUICK_REFERENCE.md](TRAINING_QUICK_REFERENCE.md) — Quick start & examples
+- The training module has been refactored (April 2026) into 6 focused, documented modules: `config.py`, `data_handling.py`, `model_training.py`, `evaluation.py`, `export.py`, and `pipeline.py`. See the architecture guide for details.
 
 **Phase 3 status update:**
 - Phase 3 is implemented and validated end-to-end on the generated parquet inputs.
@@ -231,21 +242,47 @@ Do not touch hyperparameters until the baseline is fully evaluated and saved.
 - If ONNX export fails again, the script now writes details to `outputs/models/onnx_export_error.log` and a compact status file, rather than flooding the terminal.
 
 ### Phase 4 — Streamlit dashboard (Days 6–8)
-Work happens in `services/streamlit/app.py`. Load the model artifact from the shared
+Work happens in `celesify/streamlit_app/`. Load model artifact and metrics from the shared
 volume at startup; all inference runs in-process.
 
-Three views:
+**Model Selection:**
+- Sidebar radio selector to choose between trained model variants:
+  - **Baseline (default)** — baseline RF with original features only
+  - **Clean Tuned** — tuned RF with cleaned original features
+  - **Tuned (engineered)** — tuned RF with engineered features (auto-calculated colors, band stats, interactions)
+- Dynamically loads corresponding metrics and updates all dashboard views
 
-1. **Data explorer** — class distribution bar chart, per-feature histograms, correlation
-   heatmap of photometric bands
-2. **Results dashboard** — confusion matrix heatmap, per-class precision/recall/F1 table,
-   feature importance bar chart (baseline vs tuned side-by-side)
-3. **Upload & infer** — accept a CSV or manual input of feature values; return predicted
-   class and per-class probability
+**Three main views:**
 
-- [ ] Confirm the app loads the model and returns predictions before building UI
-- [ ] All figures should be reproducible from the saved metric/importance JSON files
-  (not regenerated from training data at runtime)
+1. **Data Explorer** — Analyze preprocessed datasets with context-aware feature defaults:
+   - Class distribution bar chart
+   - Per-feature histograms with smart defaults:
+     - *Cleaned mode*: shows only original features (alpha, delta, u, g, r, i, z, redshift)
+     - *Engineered mode*: shows original + engineered (color differences, band statistics, interactions)
+   - Correlation heatmap of photometric bands (optional redshift inclusion)
+   - Univariate boxplots grouped by class
+   - Multivariate pair plots with context-sensitive feature defaults
+   - All plots support user-adjustable sample sizes and feature selection
+
+2. **Model Evaluation** — Results dashboard showing:
+   - Confusion matrix heatmap for selected model
+   - Per-class precision/recall/F1 table
+   - Feature importance bar chart (baseline vs tuned side-by-side via MDI scores)
+   - Hyperparameter comparison across model variants
+
+3. **Upload & Infer** — Inference interface with automatic feature engineering:
+   - **Manual input mode**: Accept 8 original parameters only (alpha, delta, u, g, r, i, z, redshift)
+   - **CSV upload mode**: Accept CSV with original feature columns only
+   - Automatically calculates engineered features (color differences, band stats, interactions)
+   - Returns predicted class, per-class probabilities via bar chart, and detailed results table
+   - Validates input types and handles missing/malformed data gracefully
+
+**Implementation Status (April 2026):**
+- [x] Model variant discovery and selection in sidebar
+- [x] Context-aware feature defaults for data explorer (cleaned vs engineered)
+- [x] Upload & infer accepts only original parameters, auto-engineers features
+- [x] All artifact loading with graceful error handling
+- [x] All figures reproducible from saved JSON metrics (not regenerated from data)
 
 ### Phase 5 — Analysis, writing & submission (Days 8–12)
 - [ ] Export all figures at 300 DPI to `figures/` for paper inclusion
