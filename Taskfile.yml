@@ -17,27 +17,6 @@ tasks:
       - echo "Rye is required. Install from https://rye.astral.sh/ and retry."
       - exit 1
 
-  sync-preprocess:
-    desc: Sync the Rye environment for preprocessing work.
-    deps:
-      - rye
-    cmds:
-      - "{{.RYE_BIN}} sync --features preprocessing"
-
-  sync-train:
-    desc: Sync the Rye environment for training work (CPU + ONNX path).
-    deps:
-      - rye
-    cmds:
-      - "{{.RYE_BIN}} sync --features training-core --features training-onnx"
-
-  sync-streamlit:
-    desc: Sync the Rye environment for streamlit work.
-    deps:
-      - rye
-    cmds:
-      - "{{.RYE_BIN}} sync --features streamlit"
-
   sync-all:
     desc: Sync the Rye environment with all service dependency groups.
     deps:
@@ -48,21 +27,21 @@ tasks:
   run-preprocess:
     desc: Run preprocessing through Rye.
     deps:
-      - rye
+      - sync-all
     cmds:
       - "{{.RYE_BIN}} run preprocess"
 
   run-train:
     desc: Run training through Rye.
     deps:
-      - rye
+      - sync-all
     cmds:
       - "{{.RYE_BIN}} run train"
 
   run-streamlit:
     desc: Run the Streamlit app through Rye.
     deps:
-      - rye
+      - sync-all
     cmds:
       - "{{.RYE_BIN}} run streamlit-app"
 

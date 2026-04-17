@@ -66,6 +66,12 @@ add_bashrc_line 'source "$HOME/.rye/env"'
 # Ensure all workspace files are owned by the current (vscode) user to prevent
 # permission issues across container rebuilds and different execution contexts.
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Sync Rye environment with all features.
+echo "Syncing Rye environment with all features..."
+cd "$WORKSPACE_DIR"
+rye sync --all-features
+
 CURRENT_UID=$(id -u)
 CURRENT_GID=$(id -g)
 
@@ -82,15 +88,16 @@ else
   find "$WORKSPACE_DIR" \! -path '*/.venv/*' \! -path '*/__pycache__/*' \! -path '*/.git/*' -type d -exec chown "$CURRENT_UID:$CURRENT_GID" {} \; 2>/dev/null || true
 fi
 
-# Handle .venv and .git separately in case they exist
-fix_ownership "$WORKSPACE_DIR/.venv" "virtual environment"
+# Handle .venv (Rye-managed) and .git separately to ensure proper ownership
+fix_ownership "$WORKSPACE_DIR/.venv" "Rye-managed virtual environment"
 fix_ownership "$WORKSPACE_DIR/.git" ".git directory"
 
 for lockfile in "$WORKSPACE_DIR/requirements.lock" "$WORKSPACE_DIR/requirements-dev.lock"; do
   fix_ownership "$lockfile" "$(basename "$lockfile")"
 done
 
-# Handle stale venv linked to root interpreter.
+# Clean up stale .venv from previous container sessions (if linked to root).
+# This ensures a fresh Rye environment on rebuild.
 if [ -L "$WORKSPACE_DIR/.venv/bin/python" ]; then
   target=$(readlink "$WORKSPACE_DIR/.venv/bin/python" || true)
   [[ "$target" == /root/* ]] && rm -rf "$WORKSPACE_DIR/.venv"

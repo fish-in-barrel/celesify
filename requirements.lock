@@ -3,8 +3,8 @@
 #
 # last locked with the following flags:
 #   pre: false
-#   features: ["preprocessing","training-core","training-onnx","streamlit"]
-#   all-features: false
+#   features: []
+#   all-features: true
 #   with-sources: false
 #   generate-hashes: false
 #   universal: false
@@ -123,7 +123,7 @@ protobuf==4.25.9
 pyarrow==16.1.0
     # via celesify
     # via streamlit
-pydeck==0.9.1
+pydeck==0.9.2
     # via streamlit
 pygments==2.20.0
     # via rich
