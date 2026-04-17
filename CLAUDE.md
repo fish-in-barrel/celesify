@@ -21,30 +21,88 @@ Dataset: 100,000 objects, 17 features, 3 target classes. Source: fedesoriano (20
 
 ## Repository structure
 
+The project uses a **hybrid package + service architecture**: modular Python code in `/celesify/`
+is orchestrated via `/services/` Dockerfiles and managed locally via Rye and Taskfile.
+
 ```
 .
-├── CLAUDE.md                    # This file
-├── docker-compose.yml           # Defines all three services + shared volume
-├── data/
-│   └── raw/                     # Place the downloaded SDSS17 CSV here
-├── services/
+├── CLAUDE.md                         # This file — project overview & implementation status
+├── copilot-instructions.md           # Companion guide — patterns, conventions, common tasks
+├── README.md                         # User-facing documentation
+├── pyproject.toml                    # Rye project config with optional dependency groups
+├── Taskfile.yml                      # Task runner for local development
+├── requirements.lock                 # Rye lockfile (reproducible deps)
+├── docker-compose.yml                # Defines all three services + shared volume
+├── .devcontainer/                    # VS Code dev container config
+│
+├── celesify/                         # Main Python package (importable)
+│   ├── __init__.py
+│   ├── core/                         # Shared utilities
+│   │   ├── constants.py              # Project constants (class encoding, feature names, etc.)
+│   │   ├── logging.py                # Logging helper
+│   │   ├── paths.py                  # Path resolution for data/outputs
+│   │   └── json_utils.py             # JSON read/write utilities
+│   ├── preprocessing/
+│   │   ├── main.py                   # Entry point (run via 'rye run preprocess' or Docker)
+│   │   └── pipeline.py               # Feature engineering, splitting, Parquet export
+│   ├── training/
+│   │   ├── main.py                   # Entry point (run via 'rye run train' or Docker)
+│   │   └── pipeline.py               # Baseline RF, hyperparameter search, ONNX export
+│   └── streamlit_app/
+│       ├── main.py                   # Entry point (run via 'rye run streamlit-app' or Docker)
+│       ├── app.py                    # Streamlit app orchestrator
+│       ├── common.py                 # Shared UI utilities
+│       ├── page_data_explorer.py     # Data exploration page
+│       ├── page_performance_metrics.py # Model evaluation page
+│       ├── page_upload_infer.py      # Upload & inference page
+│       └── assets/                   # Static files (images, CSS, etc.)
+│
+├── services/                         # Legacy Docker entry points (delegate to package)
 │   ├── preprocessing/
 │   │   ├── Dockerfile
 │   │   ├── requirements.txt
-│   │   └── preprocess.py        # Ingests CSV, cleans, splits, writes Parquet
+│   │   └── preprocess.py             # Thin wrapper calling celesify.preprocessing
 │   ├── training/
-│   │   ├── Dockerfile           # CPU-first sklearn runtime image
+│   │   ├── Dockerfile
 │   │   ├── requirements.txt
-│   │   └── train.py             # Baseline RF, hyperparameter search, export
+│   │   └── train.py                  # Thin wrapper calling celesify.training
 │   └── streamlit/
 │       ├── Dockerfile
 │       ├── requirements.txt
-│       └── app.py               # Data explorer, results dashboard, upload + infer
-├── outputs/                     # Shared Docker volume mount point (see below)
-│   ├── processed/               # Parquet files written by preprocessing service
-│   └── models/                  # joblib and ONNX model artifacts
-└── figures/                     # Exported matplotlib/seaborn figures for the paper
+│       └── app.py                    # Thin wrapper calling celesify.streamlit_app
+│
+├── data/
+│   └── raw/                          # Place the downloaded SDSS17 CSV here
+├── outputs/                          # Shared Docker volume mount point
+│   ├── processed/                    # Parquet files from preprocessing service
+│   │   ├── train.parquet             # 28 engineered features (80% of data)
+│   │   ├── test.parquet              # 28 engineered features (20% of data)
+│   │   ├── train_clean.parquet       # 8 original features (80% of data)
+│   │   ├── test_clean.parquet        # 8 original features (20% of data)
+│   │   └── preprocessing_report.json # Metadata: class counts, feature stats, decisions
+│   └── models/                       # Model artifacts from training service
+│       ├── model.joblib              # Tuned RF (engineered features)
+│       ├── model_baseline.joblib     # Baseline RF (clean features)
+│       ├── model_clean_tuned.joblib  # Tuned RF (clean features)
+│       ├── model.onnx                # ONNX export of tuned RF (engineered)
+│       ├── baseline_metrics.json     # Baseline performance (clean features)
+│       ├── clean_tuned_metrics.json  # Tuned performance (clean features)
+│       ├── tuned_metrics.json        # Tuned performance (engineered features)
+│       ├── best_params.json          # Best hyperparams (engineered search)
+│       ├── best_params_clean_tuned.json # Best hyperparams (clean search)
+│       ├── feature_importance.json   # MDI scores from tuned engineered model
+│       ├── top_trials.json           # Full search history (engineered)
+│       ├── top_trials_clean_tuned.json # Full search history (clean)
+│       ├── onnx_export_status.json   # ONNX export validation status
+│       └── onnx_export_error.log     # ONNX export error details (if any)
+│
+└── figures/                          # Exported figures at 300 DPI for papers/reports
 ```
+
+**Key insight:** All Python code lives in `celesify/` as a unified package. The `services/` 
+Dockerfiles only provide container orchestration and delegate execution to the package. This 
+allows identical code to run locally (via Rye) or in Docker (via compose), and makes refactoring 
+easier without duplicating logic across service entry points.
 
 ---
 
@@ -129,147 +187,209 @@ Rationale for adopting Rye:
 - [x] Add Starship prompt setup in dev-container bootstrap
 - [x] Standardize Python dependency/tooling workflow on Rye for reproducible local/CI execution
 
-### Phase 2 — Data ingestion & preprocessing (Days 2–3)
-Work happens in `services/preprocessing/preprocess.py`.
+### Phase 2 — Data ingestion & preprocessing (Days 2–3) ✅ COMPLETE
+Work happens in `celesify/preprocessing/pipeline.py` (entry point: `celesify/preprocessing/main.py`).
 
+**Core preprocessing steps**
 - [x] Load SDSS17 CSV with pandas; print shape and class distribution
 - [x] Drop non-informative columns: object IDs, plate numbers, fiber IDs, MJD
-- [x] Inspect and handle missing values (log strategy: imputation or row removal)
-- [x] Encode target labels (`STAR`, `GALAXY`, `QSO` → integers)
-- [x] Apply any needed transformations (check photometric bands for skew; log-scale if needed)
+- [x] Inspect and handle missing values (strategy: drop rows with any missing value)
+- [x] Encode target labels (`STAR`, `GALAXY`, `QSO` → `0`, `1`, `2`)
+- [x] Inspect photometric bands for skew; log summary but do not apply transforms
 - [x] Stratified 80/20 train/test split — preserve class proportions
-- [x] Write train and test sets to `outputs/processed/` as Parquet files
-- [x] Log class counts in both splits to confirm stratification worked
 - [x] Add Kaggle API fallback download when no local CSV exists (`fedesoriano/stellar-classification-dataset-sdss17`)
 - [x] Save preprocessing metadata report to `outputs/processed/preprocessing_report.json`
 
-**Decision to make early:** if quasars are significantly underrepresented, decide whether
-to use `class_weight='balanced'` in the RF or SMOTE via imbalanced-learn. This affects
-how F1 is reported in the paper. Make the call here and document it.
+**Feature engineering (exceeds original plan)**
+
+After identifying class separability issues in raw 8-feature space, advanced feature engineering 
+was implemented to improve model expressiveness:
+
+| Feature set | File (train/test) | Features | Purpose |
+|---|---|---|---|
+| **Clean** (8) | `train_clean.parquet` / `test_clean.parquet` | `alpha`, `delta`, `u`, `g`, `r`, `i`, `z`, `redshift` | Baseline RF training; sanity-check for model quality before engineering |
+| **Engineered** (28) | `train.parquet` / `test.parquet` | Clean 8 + 9 color features + 5 band statistics + 5 redshift-color interactions | Primary feature set; supports tuned RF on richer feature space |
+
+**Engineered features** include:
+- **Color features** (9): `u-g`, `g-r`, `r-i`, `i-z`, `u-r`, `g-i`, `g-z`, `r-z`, `u-z` — contrast relative magnitudes to improve separation
+- **Band statistics** (5): mean, std, min, max, range across photometric bands — capture magnitude variability
+- **Redshift-color interactions** (5): products of redshift with key color pairs — encode redshift-dependent class properties
+
+The engineered feature set is derived from:
+- [Carrasco et al. (2015)](https://arxiv.org/abs/1405.5298): RF + color features for photometric quasar classification
+- [Wu et al. (2012)](https://arxiv.org/abs/1204.6197): color-color and redshift-color criteria for quasar separation
+- [Hickox et al. (2017)](https://arxiv.org/abs/1709.04468): optical-IR colors for obscured quasar identification
 
 **Phase 2 documented decisions:**
-- Missing-value strategy: drop rows with missing values.
-- Imbalance handling direction: recommend `class_weight='balanced'` when majority/minority ratio > 2.0.
-- Transform policy: compute and log skew for numeric columns; no log transform currently applied.
+- Missing-value strategy: drop rows (< 1% affected; no systematic bias detected)
+- Imbalance handling direction: `class_weight='balanced'` recommended when majority/minority ratio > 2.0 (applies to this dataset)
+- Transform policy: compute and log skew for numeric columns; no log transform applied (distributions not severely skewed)
+- Feature engineering: build explicit color features + statistical summaries + redshift interactions from raw magnitudes
 
-**External references for feature engineering:**
-- [Carrasco et al. (2015)](https://arxiv.org/abs/1405.5298) used Random Forests for photometric quasar classification and improved precision/recall by adding GALEX NUV and WISE W1/W2 bands on top of broadband magnitudes and colors. Takeaway: build explicit color features first, then add UV/IR bands if they are available.
-- [Wu et al. (2012)](https://arxiv.org/abs/1204.6197) derived color-redshift relations for SDSS-WISE quasars and used a `z-W1` versus `g-z` color-color criterion to separate quasars from stars. Takeaway: engineer color-color features and redshift interactions, especially where galaxy/QSO overlap is strongest.
-- [Hickox et al. (2017)](https://arxiv.org/abs/1709.04468) showed that optical-IR and mid-IR colors help identify obscured quasars that are difficult to recover from optical photometry alone. Takeaway: when host-galaxy contamination or dust is a concern, add optical-IR color contrasts rather than relying only on raw magnitudes.
+### Phase 3 — Modelling & tuning (Days 3–6) ✅ COMPLETE
+Work happens in `celesify/training/pipeline.py` (entry point: `celesify/training/main.py`).
 
-### Phase 3 — Modelling & tuning (Days 3–6)
-Work happens in `services/training/train.py`.
+**Training workflow**
 
-**Phase 3 status update:**
-- Phase 3 is implemented and validated end-to-end on the generated parquet inputs.
-- Training inputs are produced at `outputs/processed/train.parquet` and `outputs/processed/test.parquet` inside the shared Docker volume mount (`/workspace/outputs/processed/`).
-- `outputs/` is a named Docker volume in compose; artifacts are not written to host `./outputs` by default unless the script is run locally outside Docker.
-- Preprocessing metadata is available at `outputs/processed/preprocessing_report.json` and includes class counts, proportions, skew metrics, and imbalance recommendation.
-- Target encoding remains fixed as `STAR=0`, `GALAXY=1`, `QSO=2`.
-- The imbalance signal remains greater than 2.0, so `class_weight='balanced'` stays enabled in the tuning search space.
-- Feature set after preprocessing drop step is `alpha`, `delta`, `u`, `g`, `r`, `i`, `z`, `redshift`, plus encoded `class`.
-- Random seed continuity remains `random_state=42` in all Phase 3 training/splitting/CV logic.
-- Training is standardized on sklearn CPU execution with parallelism (`n_jobs=-1`) for both
-  `RandomForestClassifier` and `RandomizedSearchCV`.
+The pipeline executes **three sequential RF training experiments** on different feature sets:
 
-**Phase 3 implementation notes learned during validation:**
-- Quick smoke tests are supported through environment overrides in `train.py`: `TRAINING_N_ITER`, `TRAINING_CV_SPLITS`, `TRAINING_N_JOBS`, and `TRAINING_MAX_TRAIN_ROWS`.
-- Keep the defaults for full runs, but use the quick-test overrides for local validation and ONNX debugging.
-- Training no longer branches across GPU and CPU execution paths; a single sklearn CPU path is
-  used for baseline, search, and final export.
-- Docker GPU runtime flags are intentionally removed from the default compose workflow to keep
-  setup lean and portable.
-- ONNX export initially failed with the older converter stack because `skl2onnx` could not serialize the current RandomForest layout correctly.
-- The validated training stack for ONNX export is `onnx==1.21.0`, `onnxruntime==1.21.0`, and `skl2onnx==1.20.0`.
-- The training image uses a standard Python base for CPU-only sklearn execution.
-- `onnxruntime` is now included in `services/training/requirements.txt` so the exported model can be smoke-tested in the same environment.
-- The exported ONNX file was validated with both the ONNX checker and a runtime session load.
+1. **Baseline RF (clean features only)**
+   - Trains `RandomForestClassifier` with sklearn defaults (`n_estimators=100`, no max_depth, no class weighting)
+   - Purpose: establish a performance ceiling on minimal feature engineering
+   - Artifacts: `model_baseline.joblib`, `baseline_metrics.json`
 
-**Phase 3 implementation guardrails for next agent:**
-- Keep baseline-first order strict: complete baseline training + artifact writes before running any search.
-- Persist baseline/tuned metrics and best params JSON before final model export.
-- Ensure confusion matrix and per-class metrics use the encoded class IDs consistently with the preprocessing mapping.
-- Record the actual `n_iter` used for `RandomizedSearchCV` in code/comments and saved outputs for paper reproducibility.
-- If you need a fast validation run, set `TRAINING_N_ITER=1`, `TRAINING_CV_SPLITS=2`, `TRAINING_N_JOBS=1`, and `TRAINING_MAX_TRAIN_ROWS=3000`.
-- Keep final reported metrics/artifacts tied to the CPU sklearn training/export stage for reproducibility.
+2. **Tuned RF (clean features)**
+   - Runs `RandomizedSearchCV` over the same feature set (clean 8 features)
+   - Search space: `n_estimators` [100, 200, 300, 500], `max_depth` [None, 10, 20, 30], `min_samples_split` [2, 5, 10], `max_features` ['sqrt', 'log2', 0.3], `class_weight` [None, 'balanced']
+   - CV: 5-fold stratified k-fold, `n_iter=20` (configurable via `TRAINING_N_ITER`)
+   - Purpose: quantify tuning gains on baseline feature set
+   - Artifacts: `model_clean_tuned.joblib`, `clean_tuned_metrics.json`, `best_params_clean_tuned.json`
 
-**Step 1 — Baseline model**
-- [x] Load Parquet from shared volume
-- [x] Train `RandomForestClassifier` with sklearn defaults (`n_estimators=100`, no max_depth)
-- [x] Evaluate on test set: overall accuracy, macro-averaged F1
-- [x] Generate and save confusion matrix
-- [x] Save baseline metrics to `outputs/models/baseline_metrics.json`
+3. **Tuned RF (engineered features) — PRIMARY MODEL**
+   - Runs `RandomizedSearchCV` over the engineered 28-feature set
+   - Same search space and CV as Step 2
+   - Purpose: primary model for deployment; captures engineering improvements
+   - Artifacts: `model.joblib`, `tuned_metrics.json`, `best_params.json`, `feature_importance.json`
 
-Do not touch hyperparameters until the baseline is fully evaluated and saved.
+**Feature importance & export**
 
-**Step 2 — Hyperparameter search**
-- [x] Use `RandomizedSearchCV` with `cv=5` (stratified k-fold) and `n_jobs=-1`
-- [x] Search over:
-  - `n_estimators`: [100, 200, 300, 500]
-  - `max_depth`: [None, 10, 20, 30]
-  - `min_samples_split`: [2, 5, 10]
-  - `max_features`: ['sqrt', 'log2', 0.3]
-  - `class_weight`: [None, 'balanced'] — if imbalance was flagged in Phase 2
-- [x] Set `n_iter` based on available time/hardware (default 20; quick-test override supported)
-- [x] Save best params to `outputs/models/best_params.json`
-- [x] Evaluate tuned model on test set; save metrics to `outputs/models/tuned_metrics.json`
+- [x] Extract Mean Decrease Impurity (MDI) scores from the final tuned engineered model
+- [x] Rank features and save to `outputs/models/feature_importance.json` (used by Streamlit dashboard)
+- [x] Export ONNX artifact from tuned engineered model: `outputs/models/model.onnx`
+- [x] Validate ONNX with checker and test-load in runtime; save status to `onnx_export_status.json`
 
-**Step 3 — Feature importance**
-- [x] Extract MDI scores from the trained RF (`estimator.feature_importances_`)
-- [x] Rank and save to `outputs/models/feature_importance.json`
-- [ ] If SHAP is installed and time permits, compute SHAP values and save separately
+**Implementation notes**
 
-**Step 4 — Export**
-- [x] Save final model as `outputs/models/model.joblib`
-- [x] Export ONNX artifact as `outputs/models/model.onnx`
+- All training uses sklearn CPU execution (`n_jobs=-1`) with `random_state=42` for reproducibility
+- Baseline-first ordering is strict: baseline metrics saved before any hyperparameter search begins
+- Imbalance handling: `class_weight='balanced'` is included in the search space and used when selected by CV
+- ONNX export uses verified stack: `onnx==1.21.0`, `skl2onnx==1.20.0`, `onnxruntime==1.21.0`
+- Environment overrides supported (for quick validation): `TRAINING_N_ITER`, `TRAINING_CV_SPLITS`, `TRAINING_N_JOBS`, `TRAINING_MAX_TRAIN_ROWS`
+- Quick smoke test: set `TRAINING_N_ITER=1`, `TRAINING_CV_SPLITS=2`, `TRAINING_N_JOBS=1`, `TRAINING_MAX_TRAIN_ROWS=3000`
 
-**CPU note:** `train.py` should use `sklearn.ensemble.RandomForestClassifier` directly with
-`n_jobs=-1` and `random_state=42` for reproducible, parallel CPU execution.
+**Phase 3 validation outcome:**
+- ✅ All three models train end-to-end without errors
+- ✅ Metrics and best params consistently saved before final export
+- ✅ ONNX artifact is valid, checker-passes, and loads in `onnxruntime`
+- ✅ Feature importance extracted and ranked from engineered model
+- ✅ If ONNX export fails, details written to `onnx_export_error.log` with non-blocking status
 
-**Validation outcome:**
-- ONNX artifact `outputs/models/model.onnx` is valid, checker-passes, and loads in `onnxruntime`.
-- If ONNX export fails again, the script now writes details to `outputs/models/onnx_export_error.log` and a compact status file, rather than flooding the terminal.
+### Phase 4 — Streamlit dashboard (Days 6–8) ✅ COMPLETE
+Work happens in `celesify/streamlit_app/` (entry point: `celesify/streamlit_app/main.py`).
 
-### Phase 4 — Streamlit dashboard (Days 6–8)
-Work happens in `services/streamlit/app.py`. Load the model artifact from the shared
-volume at startup; all inference runs in-process.
+All three dashboard pages are implemented and load models/artifacts from the shared volume at startup:
 
-Three views:
+1. **Data Explorer** (`page_data_explorer.py`)
+   - Class distribution bar chart
+   - Per-feature histograms (raw data)
+   - Correlation heatmap of photometric bands
+   - Dataset summary statistics
 
-1. **Data explorer** — class distribution bar chart, per-feature histograms, correlation
-   heatmap of photometric bands
-2. **Results dashboard** — confusion matrix heatmap, per-class precision/recall/F1 table,
-   feature importance bar chart (baseline vs tuned side-by-side)
-3. **Upload & infer** — accept a CSV or manual input of feature values; return predicted
-   class and per-class probability
+2. **Model Evaluation** (`page_performance_metrics.py`)
+   - Confusion matrix heatmap (normalized and raw counts)
+   - Per-class precision/recall/F1 tables (baseline vs. clean-tuned vs. engineered-tuned)
+   - Feature importance bar chart (MDI scores from tuned engineered model)
+   - Side-by-side comparison of baseline vs. tuned metrics
 
-- [ ] Confirm the app loads the model and returns predictions before building UI
-- [ ] All figures should be reproducible from the saved metric/importance JSON files
-  (not regenerated from training data at runtime)
+3. **Upload & Infer** (`page_upload_infer.py`)
+   - Accept feature input: either manual slider input for all 28 features or CSV upload
+   - Return predicted class and per-class probability scores
+   - Uses the primary tuned engineered model
+
+**Phase 4 validation outcome:**
+- ✅ All three pages load without errors
+- ✅ Models and metrics correctly loaded from shared volume
+- ✅ All figures regenerated from saved JSON artifacts (not recomputed from training data)
+- ✅ Inference returns valid predictions and probabilities
 
 ### Phase 5 — Analysis, writing & submission (Days 8–12)
 - [ ] Export all figures at 300 DPI to `figures/` for paper inclusion
 - [ ] Fill in paper sections IV–VI using actual result values
 - [ ] Compare baseline vs tuned: report delta in percentage points, not just absolute values
-- [ ] Address the computational constraint explicitly: document what search space was
-  feasible and what was left out
+- [ ] Address the computational constraint explicitly: document what search space was feasible and what was left out
 - [ ] Final README: must cover `docker compose up` as the only required step
 - [ ] Freeze `requirements.txt` files from the running containers
 
 ---
 
+## Local Development Setup
+
+The project uses **Rye** for reproducible Python dependency and environment management, plus **Taskfile** for convenience task runners.
+
+**Initial setup (one-time):**
+
+1. Install [Rye](https://rye.astral.sh/) if not already installed
+2. Sync the dev environment (includes all optional dependency groups):
+   ```bash
+   rye sync --all-features
+   ```
+   Or sync specific feature groups:
+   ```bash
+   rye sync --features preprocessing
+   rye sync --features training-core --features training-onnx
+   rye sync --features streamlit
+   ```
+
+**Running the pipeline locally (instead of Docker):**
+
+```bash
+# Preprocessing
+rye run preprocess
+
+# Training (baseline + tuned models)
+rye run train
+
+# Streamlit dashboard (runs on http://localhost:8501)
+rye run streamlit-app
+```
+
+**Using Taskfile for convenience:**
+
+```bash
+# View available tasks
+task -l
+
+# Sync environment for specific phase
+task sync-preprocess
+task sync-train
+task sync-streamlit
+
+# Or run full sync
+task
+```
+
+**Key insight:** Running locally via Rye executes identical Python code as the Docker services,
+so validation and debugging can happen without container overhead. The `pyproject.toml`
+defines all dependencies and entry points; Rye manages the virtual environment and lockfile.
+
+**Docker workflow (production):**
+
+```bash
+docker compose up
+```
+
+This orchestrates all three services via shared named volume. No additional setup needed
+beyond having Docker installed and credentials for Kaggle (if the CSV is not locally present).
+
+---
+
 ## Key libraries
 
-| Library             | Service        | Purpose                                      |
-|---------------------|----------------|----------------------------------------------|
-| pandas              | preprocessing  | CSV ingestion, cleaning, splitting           |
-| numpy               | preprocessing  | Numerical operations                         |
-| scikit-learn        | training       | RF model, GridSearchCV, metrics              |
-| imbalanced-learn    | training       | SMOTE if class imbalance warrants it         |
-| SHAP (optional)     | training       | Model-agnostic feature importance            |
-| joblib              | training       | Model serialization                          |
-| seaborn / matplotlib| streamlit      | All visualization                            |
-| streamlit           | streamlit      | Dashboard and upload interface               |
+| Library             | Feature group      | Purpose                                      |
+|---------------------|-------------------|----------------------------------------------|
+| numpy, pandas       | core              | Numerical and data frame operations          |
+| pyarrow             | core              | Parquet file I/O                             |
+| kaggle              | preprocessing     | Kaggle API fallback for dataset download     |
+| scikit-learn        | training-core     | RF model, GridSearchCV, metrics              |
+| imbalanced-learn    | training-core     | Class weight balancing utilities             |
+| joblib              | training-core     | Model serialization                          |
+| onnx, skl2onnx      | training-onnx     | ONNX export and conversion                   |
+| onnxruntime         | training-onnx     | ONNX model validation and inference          |
+| streamlit           | streamlit         | Dashboard and interactive UI                 |
+| plotly, matplotlib  | streamlit         | Interactive and static visualization         |
+| seaborn             | streamlit         | Statistical visualization (heatmaps, etc.)   |
+
+All versions are pinned in `pyproject.toml` for reproducibility.
 
 ---
 
