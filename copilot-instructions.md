@@ -39,7 +39,11 @@ celesify/
 │   └── json_utils.py        # Consistent JSON read/write (pretty-print, error handling)
 ├── preprocessing/
 │   ├── main.py              # Entry point: `python -m celesify.preprocessing.main`
-│   └── pipeline.py          # Core logic: loading, cleaning, feature engineering, export
+│   ├── pipeline.py          # Orchestrator: coordinates all phases
+│   ├── loading.py           # Phase 1: CSV discovery & Kaggle download
+│   ├── cleaning.py          # Phase 2: Schema validation, missing values, target encoding
+│   ├── features.py          # Phase 3: Stratified split & feature engineering
+│   └── exports.py           # Phase 4: Parquet export & report generation
 ├── training/
 │   ├── main.py              # Entry point: `python -m celesify.training.main`
 │   └── pipeline.py          # Core logic: three model training, hyperparameter search, export
@@ -96,7 +100,7 @@ All three workflows are invoked identically regardless of execution context:
 
 **Locations:**
 - `celesify/core/constants.py`: `RANDOM_STATE = 42`
-- `celesify/preprocessing/pipeline.py`: Stratified split, feature engineering sampling
+- `celesify/preprocessing/features.py`: Stratified split, feature engineering sampling
 - `celesify/training/pipeline.py`: RF initialization, RandomizedSearchCV, cross-validation
 
 ### Class Encoding
@@ -126,7 +130,7 @@ Two distinct feature sets are maintained in parallel:
 - Band statistics (5): mean, std, min, max, range (computed across photometric bands)
 - Redshift interactions (5): redshift × {`color_u_g`, `color_g_r`, `color_r_i`, `color_i_z`, `color_g_z`}
 
-**Implementation:** See `celesify/preprocessing/pipeline.py` for feature engineering logic.
+**Implementation:** See `celesify/preprocessing/features.py` for feature engineering logic.
 
 ### Model Artifacts & Naming
 
@@ -197,25 +201,44 @@ The `paths.py` module handles the conditional logic.
 
 ### Task 1: Modify Preprocessing Pipeline
 
-**File:** `celesify/preprocessing/pipeline.py`
+The preprocessing pipeline is organized into four focused modules under `celesify/preprocessing/`:
+- [loading.py](celesify/preprocessing/loading.py) — CSV discovery & Kaggle download
+- [cleaning.py](celesify/preprocessing/cleaning.py) — Schema validation, missing values, target encoding
+- [features.py](celesify/preprocessing/features.py) — Stratified split & feature engineering
+- [exports.py](celesify/preprocessing/exports.py) — Parquet export & report generation
+- [pipeline.py](celesify/preprocessing/pipeline.py) — Orchestrator coordinating all phases
 
-**Steps:**
-1. Open `celesify/preprocessing/pipeline.py`
-2. Identify the function you want to modify (e.g., `engineer_features()`)
-3. Update the logic
-4. **Test locally first:** `rye run preprocess` (use `TRAINING_MAX_TRAIN_ROWS=3000` env var to test on a subset)
-5. Verify outputs in `outputs/processed/` (Parquet files + `preprocessing_report.json`)
-6. Commit and test in Docker: `docker compose up preprocessing`
+**Common tasks:**
 
-**Common modifications:**
-- Add a new color pair: add tuple to `COLOR_FEATURES` list (e.g., `("u", "i", "color_u_i")`)
-- Add a new statistic: add computation logic in `engineer_features()` (e.g., median, quartiles)
-- Change missing-value strategy: modify logic in `handle_missing_values()`
+**A. Add a new color pair feature:**
+1. Open `celesify/preprocessing/features.py`
+2. Add a tuple to `COLOR_FEATURES` list, e.g., `("u", "i", "color_u_i")`
+3. The `_engineer_colors()` function automatically processes it
+4. Test: `rye run preprocess`
+5. Verify in `outputs/processed/train.parquet`
 
-**Validation checklist:**
+**B. Change missing-value handling:**
+1. Open `celesify/preprocessing/cleaning.py`
+2. Modify `handle_missing_and_malformed_values()` logic
+3. Test locally: `TRAINING_MAX_TRAIN_ROWS=3000 rye run preprocess`
+4. Verify in `preprocessing_report.json` (rows_removed_missing, rows_removed_malformed)
+
+**C. Add a new band statistic:**
+1. Open `celesify/preprocessing/features.py`
+2. Modify `_engineer_band_statistics()` to compute new stat (e.g., median, quartile range)
+3. Add the stat name to `FEATURE_INTERACTIONS` or equivalent list
+4. Test: `rye run preprocess`
+
+**D. Modify data loading/Kaggle integration:**
+1. Open `celesify/preprocessing/loading.py`
+2. Update `download_from_kaggle()`, `select_csv_file()`, or `load_raw_dataframe()`
+3. Test: `rye run preprocess`
+
+**Full pipeline test checklist:**
 - ✅ Both clean and engineered Parquets are produced
 - ✅ `preprocessing_report.json` includes class counts and feature stats
-- ✅ No errors in logs; shape and class distribution printed
+- ✅ No errors in logs; shape and class distribution printed to stdout
+- ✅ Run full training to ensure downstream stages don't break: `rye run train`
 
 ### Task 2: Change Model Hyperparameters or Search Space
 

@@ -44,7 +44,11 @@ is orchestrated via `/services/` Dockerfiles and managed locally via Rye and Tas
 │   │   └── json_utils.py             # JSON read/write utilities
 │   ├── preprocessing/
 │   │   ├── main.py                   # Entry point (run via 'rye run preprocess' or Docker)
-│   │   └── pipeline.py               # Feature engineering, splitting, Parquet export
+│   │   ├── pipeline.py               # Orchestrator: coordinates all phases
+│   │   ├── loading.py                # Phase 1: CSV file discovery & Kaggle download
+│   │   ├── cleaning.py               # Phase 2: Schema validation, missing values, target encoding
+│   │   ├── features.py               # Phase 3: Stratified split & feature engineering
+│   │   └── exports.py                # Phase 4: Parquet export & report generation
 │   ├── training/
 │   │   ├── main.py                   # Entry point (run via 'rye run train' or Docker)
 │   │   └── pipeline.py               # Baseline RF, hyperparameter search, ONNX export
@@ -188,7 +192,14 @@ Rationale for adopting Rye:
 - [x] Standardize Python dependency/tooling workflow on Rye for reproducible local/CI execution
 
 ### Phase 2 — Data ingestion & preprocessing (Days 2–3) ✅ COMPLETE
-Work happens in `celesify/preprocessing/pipeline.py` (entry point: `celesify/preprocessing/main.py`).
+Work is organized into focused submodules within `celesify/preprocessing/`:
+- [loading.py](celesify/preprocessing/loading.py) — Phase 1: CSV discovery & Kaggle download
+- [cleaning.py](celesify/preprocessing/cleaning.py) — Phase 2: Schema validation, missing values, target encoding
+- [features.py](celesify/preprocessing/features.py) — Phase 3: Stratified split & feature engineering
+- [exports.py](celesify/preprocessing/exports.py) — Phase 4: Parquet export & report generation
+- [pipeline.py](celesify/preprocessing/pipeline.py) — Orchestrator: imports & coordinates all phases
+
+Entry point: `celesify/preprocessing/main.py` (run via `rye run preprocess` or Docker)
 
 **Core preprocessing steps**
 - [x] Load SDSS17 CSV with pandas; print shape and class distribution
@@ -225,6 +236,7 @@ The engineered feature set is derived from:
 - Imbalance handling direction: `class_weight='balanced'` recommended when majority/minority ratio > 2.0 (applies to this dataset)
 - Transform policy: compute and log skew for numeric columns; no log transform applied (distributions not severely skewed)
 - Feature engineering: build explicit color features + statistical summaries + redshift interactions from raw magnitudes
+- Module design: separate concerns into focused submodules for clarity, testability, and maintainability
 
 ### Phase 3 — Modelling & tuning (Days 3–6) ✅ COMPLETE
 Work happens in `celesify/training/pipeline.py` (entry point: `celesify/training/main.py`).
