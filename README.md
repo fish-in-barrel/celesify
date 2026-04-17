@@ -69,6 +69,71 @@ Preprocessing will use these values to download the dataset only when no CSV exi
 - Disk: At least 5 GB free for images, containers, dataset, and artifacts
 - No GPU required (CPU-first workflow)
 
+## Container Resource Sizing (Dev + Training)
+
+Use this section when choosing Docker/WSL resource limits for the Dev Container and the
+`training` service.
+
+### Minimum (works, but slower)
+
+- CPU: 2 vCPU
+- Memory: 6 GB RAM
+- Swap: 2 GB
+- Disk: 8 GB free
+
+Expected behavior:
+- Dev Container starts and basic editing/linting works.
+- Preprocessing should complete reliably.
+- Training completes, but hyperparameter search can be noticeably slower.
+
+### Recommended (balanced day-to-day)
+
+- CPU: 4-6 vCPU
+- Memory: 10-12 GB RAM
+- Swap: 4 GB
+- Disk: 12-20 GB free
+
+Expected behavior:
+- Smooth Dev Container experience in VS Code.
+- Good parallel performance for `RandomizedSearchCV` with sklearn (`n_jobs=-1`).
+- Reasonable runtime for baseline + tuned training pipeline.
+
+### Optimal (if your machine can spare it)
+
+- CPU: 8+ vCPU
+- Memory: 14-16 GB RAM
+- Swap: 4-8 GB
+- Disk: 20+ GB free
+
+Expected behavior:
+- Fastest local iteration for repeated training/tuning runs.
+- Better responsiveness while running Streamlit and training in parallel.
+
+### Recommendation For Your Current WSL Settings
+
+Your current limits (`10 GB` RAM, `4 GB` swap, `8` CPU) are already strong for this
+project and close to the practical sweet spot.
+
+- Keep `10 GB / 4 GB / 8 CPU` for regular development and training.
+- If you see host pressure (fan noise, system lag), reduce CPUs first (for example to 6)
+  before reducing RAM.
+- If training is the priority and your host remains responsive, increasing RAM to
+  `12-14 GB` can improve stability during heavier parallel search runs.
+
+### If You Need To Run On Lower Resources
+
+Use training environment overrides to reduce load:
+
+```bash
+TRAINING_N_JOBS=1
+TRAINING_N_ITER=5
+TRAINING_CV_SPLITS=3
+TRAINING_MAX_TRAIN_ROWS=30000
+docker compose up --build
+```
+
+These reduce CPU and memory pressure at the cost of search quality and runtime fidelity.
+
 ## Project Layout
 
 ```text
@@ -106,4 +171,3 @@ task run-streamlit
 ```
 
 Docker remains the default and recommended execution path.
-`

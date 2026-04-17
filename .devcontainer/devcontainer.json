@@ -2,8 +2,8 @@
   "name": "celesify",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
   "runArgs": [
-    "--memory=8g",
-    "--memory-swap=8g"
+    "--memory=10g",
+    "--memory-swap=14g"
   ],
   "features": {
     "ghcr.io/devcontainers/features/python:1": {
