@@ -124,8 +124,6 @@ add_bashrc_line 'eval "$(task --completion bash)"'
 # Trust repo-local .envrc.
 [ -f "$WORKSPACE_DIR/.envrc" ] && command -v direnv >/dev/null 2>&1 && direnv allow "$WORKSPACE_DIR"
 
-# Sync project dependencies.
-echo "Syncing Rye-managed project environment"
-rye sync --features preprocessing --features training-core --features training-onnx --features streamlit
+source ~/.bashrc
 
 echo "Dev container setup complete."
