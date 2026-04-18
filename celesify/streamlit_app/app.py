@@ -9,7 +9,6 @@ from celesify.streamlit_app.common import (
     SERVICE,
     inverse_class_mapping,
     load_json,
-    load_model,
     resolve_favicon,
     render_banner,
     render_startup_diagnostics,
@@ -43,14 +42,6 @@ def run() -> None:
     class_mapping = tuned_metrics.get("class_mapping") if isinstance(tuned_metrics, dict) else None
     inverse_map = inverse_class_mapping(class_mapping if isinstance(class_mapping, dict) else None)
 
-    model = None
-    try:
-        model = load_model(str(MODELS_DIR / "model.joblib"))
-    except FileNotFoundError as exc:
-        st.warning(str(exc))
-    except Exception as exc:  # pragma: no cover - runtime safety path
-        st.error(f"Failed to load model.joblib: {exc}")
-
     tab_explorer, tab_metrics, tab_infer = st.tabs(
         ["Data Exploration", "Model Evaluation", "Upload and Infer"]
     )
@@ -62,12 +53,10 @@ def run() -> None:
         render_performance_metrics(baseline_metrics, clean_tuned_metrics, tuned_metrics, best_params, feature_importance)
 
     with tab_infer:
-        if model is None:
-            st.info("Model artifact not loaded. Upload and inference are unavailable.")
-        elif not tuned_metrics:
+        if not tuned_metrics:
             st.info("Tuned metrics are missing, so feature schema could not be derived.")
         else:
-            render_upload_and_infer(model, tuned_metrics)
+            render_upload_and_infer(baseline_metrics, clean_tuned_metrics, tuned_metrics)
 
     with st.expander("Utilities", expanded=False):
         if st.button("Refresh cache"):

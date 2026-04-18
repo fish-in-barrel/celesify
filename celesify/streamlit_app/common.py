@@ -7,6 +7,7 @@ from typing import Any, Callable
 import joblib
 import pandas as pd
 import plotly.graph_objects as go
+import onnxruntime as ort
 import streamlit as st
 
 from celesify.core.constants import CLASS_ENCODING
@@ -14,6 +15,9 @@ from celesify.core.constants import CLASS_ENCODING
 SERVICE = "streamlit"
 FAVICON_PATH = Path(__file__).resolve().parent / "assets" / "favicon_galaxy.svg"
 EXPECTED_MODEL_FILES = [
+    "model_baseline.onnx",
+    "model_clean_tuned.onnx",
+    "model.onnx",
     "model.joblib",
     "baseline_metrics.json",
     "tuned_metrics.json",
@@ -237,6 +241,14 @@ def load_model(path_str: str) -> Any:
     if not path.exists():
         raise FileNotFoundError(f"Missing model artifact: {path}")
     return joblib.load(path)
+
+
+@st.cache_resource(show_spinner=False)
+def load_onnx_session(path_str: str) -> Any:
+    path = Path(path_str)
+    if not path.exists():
+        raise FileNotFoundError(f"Missing ONNX model artifact: {path}")
+    return ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
 
 
 def validate_results_artifacts(

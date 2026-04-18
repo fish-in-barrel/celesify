@@ -141,6 +141,14 @@ def run() -> None:
         class_mapping,
     )
     write_baseline_artifacts(models_dir, baseline_metrics_report)
+    export_joblib_model(baseline_eval_model, models_dir / "model_baseline.joblib")
+    export_onnx_optimized(
+        baseline_eval_model,
+        len(clean_feature_columns),
+        models_dir / "model_baseline.onnx",
+        models_dir / "onnx_export_status_baseline.json",
+        models_dir / "onnx_export_error_baseline.log",
+    )
     log(
         SERVICE,
         "Starting RandomizedSearchCV for clean features "
@@ -198,6 +206,14 @@ def run() -> None:
         clean_tuned_metrics_report,
         clean_best_params_report,
         clean_top_trials_report,
+    )
+    export_joblib_model(clean_tuned_model, models_dir / "model_clean_tuned.joblib")
+    export_onnx_optimized(
+        clean_tuned_model,
+        len(clean_feature_columns),
+        models_dir / "model_clean_tuned.onnx",
+        models_dir / "onnx_export_status_clean_tuned.json",
+        models_dir / "onnx_export_error_clean_tuned.log",
     )
 
     log(
